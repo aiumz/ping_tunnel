@@ -43,7 +43,17 @@ jobs:
       - name: Install napi CLI
         run: npm install -g @napi-rs/cli
 
+      - name: Install cross-compilation tools (Linux ARM)
+        if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build .node
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
           napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
