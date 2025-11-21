@@ -40,8 +40,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install napi-cli
-        run: npm install -g @napi/cli
+      - name: Install napi CLI
+        run: npm install -g @napi-rs/cli
 
       - name: Build .node
         run: |
