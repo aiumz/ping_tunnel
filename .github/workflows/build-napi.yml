@@ -106,5 +106,4 @@ jobs:
             ./dist/darwin-arm/ping_tunnel-darwin-arm.node \
             ./dist/win-x64/ping_tunnel-win-x64.node \
             --title "${{ github.ref_name }}" \
-            --notes "Release ${{ github.ref_name }}" \
-            --clobber
+            --notes "Release ${{ github.ref_name }}"
