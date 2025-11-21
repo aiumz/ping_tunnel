@@ -4,7 +4,6 @@ package-lock.json
 package.json
 README_NODE.md
 scripts/
-.github/
 .gitignore
 .vscode/
 .idea/

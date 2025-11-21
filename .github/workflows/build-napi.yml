@@ -1,0 +1,63 @@
+name: Build N-API
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            artifact_name: linux-x64
+          - os: ubuntu-latest
+            rust_target: aarch64-unknown-linux-gnu
+            artifact_name: linux-arm
+          - os: macos-latest
+            rust_target: x86_64-apple-darwin
+            artifact_name: mac-x64
+          - os: macos-latest
+            rust_target: aarch64-apple-darwin
+            artifact_name: mac-arm
+          - os: windows-latest
+            rust_target: x86_64-pc-windows-gnu
+            artifact_name: win-x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install napi-cli
+        run: npm install -g @napi/cli
+
+      - name: Build .node
+        run: |
+          mkdir -p dist/${{ matrix.artifact_name }}
+          napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}/*.node
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
