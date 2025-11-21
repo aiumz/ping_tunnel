@@ -1,0 +1,49 @@
+# Source files
+src/
+*.rs
+Cargo.toml
+Cargo.lock
+napi-build.toml
+
+# Keep scripts directory for postinstall
+!scripts/
+
+# Build artifacts
+target/
+*.node
+!demo1.*.node
+
+# Development files
+example.js
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Documentation (keep README_NODE.md)
+*.md
+!README_NODE.md
+
+# Certificates
+cert/
+
+# Node modules (will be installed by users)
+node_modules/
+
+# Test files
+test/
+tests/
+*.test.js
+*.spec.js
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# IDE
+*.swp
+*.swo
+*~
+.DS_Store
+

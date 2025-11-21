@@ -1,0 +1,58 @@
+{
+  "name": "ping_tunnel_edge",
+  "version": "0.1.0",
+  "description": "Edge client for QUIC tunnel",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "keywords": [
+    "quic",
+    "tunnel",
+    "edge",
+    "network",
+    "native",
+    "napi"
+  ],
+  "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "napi": {
+    "name": "ping_tunnel",
+    "triples": {
+      "defaults": true,
+      "additional": []
+    }
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "build:all": "echo 'Please build for all platforms manually or use CI/CD'",
+    "artifacts": "napi artifacts",
+    "version": "napi version",
+    "postinstall": "node scripts/postinstall.js",
+    "edge": "cargo run --bin edge  -- 127.0.0.1:4433 my-secret-token 127.0.0.1:11100",
+    "supernode": "cargo run --bin supernode"
+  },
+  "dependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README_NODE.md",
+    "scripts/",
+    "ping_tunnel.darwin-arm64.node",
+    "ping_tunnel.darwin-x64.node",
+    "ping_tunnel.linux-arm64-gnu.node",
+    "ping_tunnel.linux-arm64-musl.node",
+    "ping_tunnel.linux-x64-gnu.node",
+    "ping_tunnel.linux-x64-musl.node",
+    "ping_tunnel.win32-arm64-msvc.node",
+    "ping_tunnel.win32-x64-msvc.node"
+  ]
+}
