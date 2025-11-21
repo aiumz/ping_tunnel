@@ -26,7 +26,7 @@
     }
   },
   "scripts": {
-    "build": "napi build --platform --release",
+    "build": "napi build --platform --release -o ./build",
     "build:debug": "napi build --platform",
     "build:all": "echo 'Please build for all platforms manually or use CI/CD'",
     "artifacts": "napi artifacts",
@@ -36,23 +36,12 @@
     "supernode": "cargo run --bin supernode"
   },
   "dependencies": {
-    "@napi-rs/cli": "^2.18.0"
+    "@napi-rs/cli": "^3.4.1"
   },
   "engines": {
     "node": ">= 10"
   },
   "files": [
-    "index.js",
-    "index.d.ts",
-    "README_NODE.md",
-    "scripts/",
-    "ping_tunnel.darwin-arm64.node",
-    "ping_tunnel.darwin-x64.node",
-    "ping_tunnel.linux-arm64-gnu.node",
-    "ping_tunnel.linux-arm64-musl.node",
-    "ping_tunnel.linux-x64-gnu.node",
-    "ping_tunnel.linux-x64-musl.node",
-    "ping_tunnel.win32-arm64-msvc.node",
-    "ping_tunnel.win32-x64-msvc.node"
+    "build/"
   ]
 }

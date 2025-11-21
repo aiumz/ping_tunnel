@@ -1,4 +1,3 @@
-use hyper::Response;
 use ping_tunnel::lib::common::{AUTH_TOKEN_KEY, FORWARD_TO_KEY, get_client_id_from_token};
 use ping_tunnel::lib::connections::CONNECTIONS;
 use ping_tunnel::lib::forward::tcp_to_quic;
