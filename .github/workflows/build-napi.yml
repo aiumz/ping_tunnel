@@ -1,4 +1,4 @@
-name: Build N-API
+name: Build and Release N-API
 
 on:
   push:
@@ -78,15 +78,21 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # 确保 token 有权限创建 release
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./dist
 
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install -y gh
+
       - name: Create GitHub Release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          files: ./dist/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} ./dist/**/*
