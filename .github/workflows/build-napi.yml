@@ -79,8 +79,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 确保 token 有权限创建 release
+      contents: write
     steps:
+      - uses: actions/checkout@v4 # 必须 checkout 仓库，避免 gh release 报错
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
