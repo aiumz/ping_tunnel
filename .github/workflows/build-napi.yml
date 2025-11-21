@@ -19,10 +19,10 @@ jobs:
             artifact_name: linux-arm
           - os: macos-latest
             rust_target: x86_64-apple-darwin
-            artifact_name: mac-x64
+            artifact_name: darwin-x64
           - os: macos-latest
             rust_target: aarch64-apple-darwin
-            artifact_name: mac-arm
+            artifact_name: darwin-arm
           - os: windows-latest
             rust_target: x86_64-pc-windows-msvc
             artifact_name: win-x64
@@ -58,6 +58,7 @@ jobs:
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
           napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
+          mv dist/${{ matrix.artifact_name }}/ping_tunnel.node dist/${{ matrix.artifact_name }}/ping_tunnel-${{ matrix.artifact_name }}.node
 
       - name: Build .node (Windows)
         if: matrix.os == 'windows-latest'
@@ -68,12 +69,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist\${{ matrix.artifact_name }}"
           $env:PATH = "$env:PATH;$env:ProgramFiles\nodejs"
           napi build --release --target ${{ matrix.rust_target }} -o "dist\${{ matrix.artifact_name }}"
+          Move-Item -Path "dist\${{ matrix.artifact_name }}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name }}\ping_tunnel-${{ matrix.artifact_name }}.node"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.artifact_name }}/*.node
+          path: dist/${{ matrix.artifact_name }}/ping_tunnel-${{ matrix.artifact_name }}.node
 
   release:
     needs: build
@@ -81,7 +83,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4 # 必须 checkout 仓库，避免 gh release 报错
+      - uses: actions/checkout@v4
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -93,15 +95,16 @@ jobs:
           sudo apt update
           sudo apt install -y gh
 
-      - name: Create or Update GitHub Release
+      - name: Create GitHub Release and Upload Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ github.ref_name }} --title "${{ github.ref_name }}" --notes "Release ${{ github.ref_name }}" || echo "Release already exists"
-          gh release upload ${{ github.ref_name }} \
-            ./dist/linux-x64/ping_tunnel.node \
-            ./dist/linux-arm/ping_tunnel.node \
-            ./dist/mac-x64/ping_tunnel.node \
-            ./dist/mac-arm/ping_tunnel.node \
-            ./dist/win-x64/ping_tunnel.node \
+          gh release create ${{ github.ref_name }} \
+            ./dist/linux-x64/ping_tunnel-linux-x64.node \
+            ./dist/linux-arm/ping_tunnel-linux-arm.node \
+            ./dist/darwin-x64/ping_tunnel-darwin-x64.node \
+            ./dist/darwin-arm/ping_tunnel-darwin-arm.node \
+            ./dist/win-x64/ping_tunnel-win-x64.node \
+            --title "${{ github.ref_name }}" \
+            --notes "Release ${{ github.ref_name }}" \
             --clobber
