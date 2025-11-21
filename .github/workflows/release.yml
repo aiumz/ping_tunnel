@@ -1,4 +1,4 @@
-name: Build and Release N-API
+name: Build and Release
 
 on:
   push:
@@ -58,7 +58,7 @@ jobs:
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
           napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
-          mv dist/${{ matrix.artifact_name }}/ping_tunnel.node dist/${{ matrix.artifact_name }}/ping_tunnel-${{ matrix.artifact_name }}.node
+          mv dist/${{ matrix.artifact_name }}/ping_tunnel.node dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
 
       - name: Build binaries (Linux/Mac)
         if: matrix.os != 'windows-latest'
@@ -80,7 +80,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist\${{ matrix.artifact_name }}"
           $env:PATH = "$env:PATH;$env:ProgramFiles\nodejs"
           napi build --release --target ${{ matrix.rust_target }} -o "dist\${{ matrix.artifact_name }}"
-          Move-Item -Path "dist\${{ matrix.artifact_name }}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name }}\ping_tunnel-${{ matrix.artifact_name }}.node"
+          Move-Item -Path "dist\${{ matrix.artifact_name }}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.node"
 
       - name: Build binaries (Windows)
         if: matrix.os == 'windows-latest'
@@ -97,7 +97,7 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: |
-            dist/${{ matrix.artifact_name }}/ping_tunnel-${{ matrix.artifact_name }}.node
+            dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
             dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}*
             dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}*
 
@@ -124,19 +124,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ github.ref_name }} \
-            ./dist/linux-x64/ping_tunnel-linux-x64.node \
+            ./dist/linux-x64/edge-linux-x64.node \
             ./dist/linux-x64/edge-linux-x64 \
             ./dist/linux-x64/supernode-linux-x64 \
-            ./dist/linux-arm/ping_tunnel-linux-arm.node \
+            ./dist/linux-arm/edge-linux-arm.node \
             ./dist/linux-arm/edge-linux-arm \
             ./dist/linux-arm/supernode-linux-arm \
-            ./dist/darwin-x64/ping_tunnel-darwin-x64.node \
+            ./dist/darwin-x64/edge-darwin-x64.node \
             ./dist/darwin-x64/edge-darwin-x64 \
             ./dist/darwin-x64/supernode-darwin-x64 \
-            ./dist/darwin-arm/ping_tunnel-darwin-arm.node \
+            ./dist/darwin-arm/edge-darwin-arm.node \
             ./dist/darwin-arm/edge-darwin-arm \
             ./dist/darwin-arm/supernode-darwin-arm \
-            ./dist/win-x64/ping_tunnel-win-x64.node \
+            ./dist/win-x64/edge-win-x64.node \
             ./dist/win-x64/edge-win-x64.exe \
             ./dist/win-x64/supernode-win-x64.exe \
             --title "${{ github.ref_name }}" \
