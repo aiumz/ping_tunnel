@@ -60,6 +60,17 @@ jobs:
           napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
           mv dist/${{ matrix.artifact_name }}/ping_tunnel.node dist/${{ matrix.artifact_name }}/ping_tunnel-${{ matrix.artifact_name }}.node
 
+      - name: Build binaries (Linux/Mac)
+        if: matrix.os != 'windows-latest'
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        run: |
+          cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
+          cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
+          cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
+
       - name: Build .node (Windows)
         if: matrix.os == 'windows-latest'
         env:
@@ -71,11 +82,24 @@ jobs:
           napi build --release --target ${{ matrix.rust_target }} -o "dist\${{ matrix.artifact_name }}"
           Move-Item -Path "dist\${{ matrix.artifact_name }}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name }}\ping_tunnel-${{ matrix.artifact_name }}.node"
 
+      - name: Build binaries (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        shell: powershell
+        run: |
+          cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
+          Copy-Item -Path "target\${{ matrix.rust_target }}\release\edge.exe" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.exe"
+          Copy-Item -Path "target\${{ matrix.rust_target }}\release\supernode.exe" -Destination "dist\${{ matrix.artifact_name }}\supernode-${{ matrix.artifact_name }}.exe"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.artifact_name }}/ping_tunnel-${{ matrix.artifact_name }}.node
+          path: |
+            dist/${{ matrix.artifact_name }}/ping_tunnel-${{ matrix.artifact_name }}.node
+            dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}*
+            dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}*
 
   release:
     needs: build
@@ -101,9 +125,19 @@ jobs:
         run: |
           gh release create ${{ github.ref_name }} \
             ./dist/linux-x64/ping_tunnel-linux-x64.node \
+            ./dist/linux-x64/edge-linux-x64 \
+            ./dist/linux-x64/supernode-linux-x64 \
             ./dist/linux-arm/ping_tunnel-linux-arm.node \
+            ./dist/linux-arm/edge-linux-arm \
+            ./dist/linux-arm/supernode-linux-arm \
             ./dist/darwin-x64/ping_tunnel-darwin-x64.node \
+            ./dist/darwin-x64/edge-darwin-x64 \
+            ./dist/darwin-x64/supernode-darwin-x64 \
             ./dist/darwin-arm/ping_tunnel-darwin-arm.node \
+            ./dist/darwin-arm/edge-darwin-arm \
+            ./dist/darwin-arm/supernode-darwin-arm \
             ./dist/win-x64/ping_tunnel-win-x64.node \
+            ./dist/win-x64/edge-win-x64.exe \
+            ./dist/win-x64/supernode-win-x64.exe \
             --title "${{ github.ref_name }}" \
             --notes "Release ${{ github.ref_name }}"
