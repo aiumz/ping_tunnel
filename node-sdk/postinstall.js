@@ -17,6 +17,7 @@ const archMap = {
   arm64: 'arm',
 };
 
+const packageVersion = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version;
 const platformName = platformMap[platform];
 const archName = archMap[arch];
 
@@ -31,7 +32,7 @@ if (fs.existsSync(libPath)) {
   console.log(`Native binding found: ${libPath}`);
   process.exit(0);
 } else {
-  fetch(`https://github.com/aiumz/ping_tunnel/releases/download/v0.0.14/edge-${platformName}-${archName}.node`)
+  fetch(`https://github.com/aiumz/ping_tunnel/releases/download/v${packageVersion}/edge-${platformName}-${archName}.node`)
     .then(response => response.arrayBuffer())
     .then(buffer => {
       fs.writeFileSync(libPath, Buffer.from(buffer));

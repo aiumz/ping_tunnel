@@ -5,8 +5,8 @@ use quinn::{ClientConfig, Endpoint};
 use rustls::ClientConfig as RustlsClientConfig;
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::Duration;
 
-/// 用于开发测试的证书验证器（接受所有证书）
 #[derive(Debug)]
 struct NoCertificateVerification;
 
@@ -64,12 +64,10 @@ pub async fn connect_to_server(server_addr: String, token: String, forward_to: S
         .install_default()
         .expect("Failed to install default crypto provider");
 
-    // 创建客户端 TLS 配置（不验证证书，信任所有证书）
     let mut client_config = RustlsClientConfig::builder()
         .with_root_certificates(rustls::RootCertStore::empty())
         .with_no_client_auth();
 
-    // 禁用证书验证，信任所有证书
     client_config
         .dangerous()
         .set_certificate_verifier(Arc::new(NoCertificateVerification));
@@ -83,9 +81,8 @@ pub async fn connect_to_server(server_addr: String, token: String, forward_to: S
         }
     };
 
-    // 配置传输参数：设置 keep-alive 和 idle timeout
     let mut transport_config = quinn::TransportConfig::default();
-    transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(10)));
+    transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
     transport_config.max_idle_timeout(None);
 
     let mut client_config = ClientConfig::new(Arc::new(quic_client_config));
@@ -95,21 +92,31 @@ pub async fn connect_to_server(server_addr: String, token: String, forward_to: S
     endpoint.set_default_client_config(client_config);
     loop {
         println!("Connecting to Server: {} ...", server_addr);
-        let connecting = endpoint.connect(server_addr.parse().unwrap(), "localhost");
-
-        let connecting = match connecting {
-            Ok(connecting) => connecting,
-            Err(e) => {
-                eprintln!("Failed to connect to Server: {}", e);
-                return;
+        let conn = match tokio::time::timeout(Duration::from_secs(5), async {
+            let connecting = endpoint.connect(server_addr.parse().unwrap(), "localhost");
+            let connecting = match connecting {
+                Ok(connecting) => connecting,
+                Err(e) => return Err(anyhow::anyhow!(e)),
+            };
+            match connecting.await {
+                Ok(conn) => Ok(conn),
+                Err(e) => return Err(anyhow::anyhow!(e)),
             }
-        };
-
-        let conn = match connecting.await {
-            Ok(conn) => conn,
-            Err(e) => {
+        })
+        .await
+        {
+            Ok(Ok(conn)) => {
+                println!("Connected to Server successfully: {}", server_addr);
+                conn
+            }
+            Ok(Err(e)) => {
                 eprintln!("Failed to connect to Server: {}", e);
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                continue;
+            }
+            Err(_e) => {
+                eprintln!("Connection timeout, retrying in 2 seconds... ");
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 continue;
             }
         };
