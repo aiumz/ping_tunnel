@@ -9,7 +9,7 @@ const arch = process.arch;
 const platformMap = {
   darwin: 'darwin',
   linux: 'linux',
-  win32: 'win32',
+  win32: 'win',
 };
 
 const archMap = {
