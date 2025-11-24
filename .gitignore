@@ -1,7 +1,6 @@
 /target
 node_modules/
 package-lock.json
-package.json
 README_NODE.md
 scripts/
 .gitignore
