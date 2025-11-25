@@ -2,26 +2,44 @@ use ping_tunnel::lib::common::{AUTH_TOKEN_KEY, FORWARD_TO_KEY, get_client_id_fro
 use ping_tunnel::lib::connections::CONNECTIONS;
 use ping_tunnel::lib::forward::tcp_to_quic;
 use ping_tunnel::lib::sniff::sniff_tcp;
+use std::env;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install default crypto provider");
+    let args: Vec<String> = env::args().collect();
 
-    println!("Loading certificate...");
-    let (cert_der, key_der) = ping_tunnel::lib::cert::load_cert()?;
-    println!("Starting QUIC server on 0.0.0.0:4433...");
-    ping_tunnel::lib::server::start_server(cert_der, key_der, "0.0.0.0:4433".parse()?).await?;
+    if args.len() != 5 {
+        eprintln!(
+            "Usage: {} <quic_bind_addr:port> <tcp_bind_addr:port> <cert_path> <key_path>",
+            args[0]
+        );
+        std::process::exit(1);
+    }
+
+    let quic_bind_addr = args[1].clone();
+    let tcp_bind_addr = args[2].clone();
+    let cert_path = args[3].clone();
+    let key_path = args[4].clone();
+    supernode_handle(quic_bind_addr, tcp_bind_addr, cert_path, key_path).await
+}
+
+async fn supernode_handle(
+    quic_bind_addr: String,
+    tcp_bind_addr: String,
+    cert_path: String,
+    key_path: String,
+) -> anyhow::Result<()> {
+    let (cert_der, key_der) = ping_tunnel::lib::cert::load_cert(cert_path, key_path)?;
+    println!("Starting QUIC server on {}...", quic_bind_addr);
+    ping_tunnel::lib::server::start_server(cert_der, key_der, quic_bind_addr.parse()?).await?;
     println!("QUIC server started successfully");
 
-    let addr: std::net::SocketAddr = ([0, 0, 0, 0], 4432).into();
-    println!("Binding TCP listener on {}...", addr);
-    let listener = TcpListener::bind(addr).await?;
+    println!("Binding TCP listener on {}...", tcp_bind_addr);
+    let listener = TcpListener::bind(&tcp_bind_addr).await?;
     println!(
         "HTTP server listening on http://{}, forwarding to QUIC",
-        addr
+        tcp_bind_addr
     );
     println!("Server ready, waiting for connections...");
 
