@@ -5,7 +5,7 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
 
     if args.len() != 4 {
-        eprintln!("Usage: {} <server_addr> <token> <forward_to>", args[0]);
+        eprintln!("Usage: {} <server_addr:port> <token> <forward_to>", args[0]);
         std::process::exit(1);
     }
 

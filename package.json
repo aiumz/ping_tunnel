@@ -33,7 +33,7 @@
     "version": "napi version",
     "postinstall": "node scripts/postinstall.js",
     "edge": "cargo run --bin edge  -- 127.0.0.1:4433 my-secret-token 127.0.0.1:11100",
-    "supernode": "cargo run --bin supernode"
+    "supernode": "cargo run --bin supernode -- 0.0.0.0:4433 0.0.0.0:4432 ./cert/cert.pem ./cert/key.pem"
   },
   "dependencies": {
     "@napi-rs/cli": "^3.4.1"

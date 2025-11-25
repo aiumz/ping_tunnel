@@ -110,14 +110,7 @@ async fn tunnel_handle(
                 eprintln!("[ERROR] Failed to send auth response: {}", e);
                 return;
             } else {
-                connections.insert(
-                    client_id.clone(),
-                    ConnectionSession {
-                        conn: conn,
-                        ping_at: Instant::now(),
-                        meta: TunnelMeta::new(),
-                    },
-                );
+                connections.insert(client_id.clone(), ConnectionSession::new(conn.clone()));
                 println!("[INFO] Client {} authenticated successfully", client_id);
             }
         }
