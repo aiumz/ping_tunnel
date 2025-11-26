@@ -1,6 +1,6 @@
 {
   "name": "ping_tunnel_edge",
-  "version": "0.1.0",
+  "version": "0.0.3",
   "description": "Edge client for QUIC tunnel",
   "main": "index.js",
   "types": "index.d.ts",
