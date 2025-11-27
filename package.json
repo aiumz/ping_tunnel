@@ -1,6 +1,6 @@
 {
   "name": "ping_tunnel_edge",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Edge client for QUIC tunnel",
   "main": "index.js",
   "types": "index.d.ts",
@@ -32,7 +32,7 @@
     "artifacts": "napi artifacts",
     "version": "napi version",
     "postinstall": "node scripts/postinstall.js",
-    "edge": "cargo run --bin edge  -- 127.0.0.1:4433 my-secret-token 127.0.0.1:11100",
+    "edge": "cargo run --bin edge  -- 127.0.0.1:4433 'my-secret-token' 127.0.0.1:11100",
     "supernode": "cargo run --bin supernode -- 0.0.0.0:4433 0.0.0.0:4432 ./cert/cert.pem ./cert/key.pem"
   },
   "dependencies": {

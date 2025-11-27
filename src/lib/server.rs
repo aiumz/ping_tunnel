@@ -1,4 +1,6 @@
-use crate::lib::common::{AUTH_TOKEN_KEY, FORWARD_TO_KEY, get_client_id_from_token};
+use crate::lib::common::{
+    AUTH_TOKEN_KEY, DEVICE_NAME_KEY, FORWARD_TO_KEY, get_client_id_from_token,
+};
 use crate::lib::connections::{CONNECTIONS, ConnectionSession};
 use crate::lib::forward::{quic_to_tcp, response_command};
 use crate::lib::packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta};
@@ -26,7 +28,6 @@ pub async fn start_server(
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
     transport_config.max_idle_timeout(None);
-
     let mut server_config = ServerConfig::with_crypto(Arc::new(quic_server_config));
     server_config.transport = Arc::new(transport_config);
 
@@ -110,7 +111,17 @@ async fn tunnel_handle(
                 eprintln!("[ERROR] Failed to send auth response: {}", e);
                 return;
             } else {
-                connections.insert(client_id.clone(), ConnectionSession::new(conn.clone()));
+                let meta = TunnelMeta::from([
+                    (AUTH_TOKEN_KEY.to_string(), Value::String(token.to_string())),
+                    (
+                        DEVICE_NAME_KEY.to_string(),
+                        header.meta.get(DEVICE_NAME_KEY).unwrap_or_default().clone(),
+                    ),
+                ]);
+                connections.insert(
+                    client_id.clone(),
+                    ConnectionSession::new(conn.clone(), meta),
+                );
                 println!("[INFO] Client {} authenticated successfully", client_id);
             }
         }

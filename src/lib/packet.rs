@@ -89,7 +89,7 @@ impl TunnelCommandPacket {
             length,
             meta: data,
         };
-        println!("[DEBUG]  {:?}", result);
+        // println!("[DEBUG]  {:?}", result);
         Ok(result)
     }
 }

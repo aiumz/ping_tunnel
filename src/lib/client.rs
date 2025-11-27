@@ -1,8 +1,9 @@
 use crate::lib::cert::get_client_crypto_config;
-use crate::lib::common::{AUTH_TOKEN_KEY, FORWARD_TO_KEY};
+use crate::lib::common::{AUTH_TOKEN_KEY, DEVICE_NAME_KEY, FORWARD_TO_KEY};
 use crate::lib::connections::{CONNECTIONS, ConnectionSession, DEFAULT_CLIENT_ID};
 use crate::lib::forward::{command_to_quic, quic_to_tcp};
 use crate::lib::packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta};
+use hostname::get as get_hostname;
 use quinn::{ClientConfig, Endpoint};
 use serde_json::Value;
 use std::sync::Arc;
@@ -19,15 +20,13 @@ pub async fn connect_to_server(server_addr: String, token: String, forward_to: S
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
     transport_config.max_idle_timeout(None);
-
     let mut client_config = ClientConfig::new(Arc::new(client_crypto_config));
     client_config.transport_config(Arc::new(transport_config));
-
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
     endpoint.set_default_client_config(client_config);
     loop {
         println!("Connecting to Server: {} ...", server_addr);
-        let conn = match tokio::time::timeout(Duration::from_secs(5), async {
+        let conn = match tokio::time::timeout(Duration::from_secs(10), async {
             let connecting = endpoint.connect(server_addr.parse().unwrap(), "localhost");
             let connecting = match connecting {
                 Ok(connecting) => connecting,
@@ -59,7 +58,18 @@ pub async fn connect_to_server(server_addr: String, token: String, forward_to: S
         {
             let token = token.clone();
             let conn = conn.clone();
-            let auth_meta = TunnelMeta::from([(AUTH_TOKEN_KEY.to_string(), Value::String(token))]);
+            let auth_meta = TunnelMeta::from([
+                (AUTH_TOKEN_KEY.to_string(), Value::String(token)),
+                (
+                    DEVICE_NAME_KEY.to_string(),
+                    Value::String(
+                        get_hostname()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string(),
+                    ),
+                ),
+            ]);
             let auth_packet = command_to_quic(conn, TunnelCommand::Auth, &auth_meta);
             match auth_packet.await {
                 Ok(packet) => {
@@ -81,7 +91,7 @@ pub async fn connect_to_server(server_addr: String, token: String, forward_to: S
         }
         CONNECTIONS.insert(
             DEFAULT_CLIENT_ID.to_string(),
-            ConnectionSession::new(conn.clone()),
+            ConnectionSession::new(conn.clone(), TunnelMeta::new()),
         );
         let forward_task = {
             let conn = conn.clone();

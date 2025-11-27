@@ -2,9 +2,12 @@ use ping_tunnel::lib::common::{AUTH_TOKEN_KEY, FORWARD_TO_KEY, get_client_id_fro
 use ping_tunnel::lib::connections::CONNECTIONS;
 use ping_tunnel::lib::forward::tcp_to_quic;
 use ping_tunnel::lib::sniff::sniff_tcp;
+use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::env;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -56,6 +59,24 @@ async fn supernode_handle(
                             return;
                         }
                     };
+                    if request_info.method == "GET" && request_info.url == "/__internal__/clients" {
+                        let clients = CONNECTIONS
+                            .iter()
+                            .filter(|k| k.value().ping_at.elapsed().as_secs() < 30)
+                            .map(|k| k.value().meta.clone())
+                            .collect::<Vec<HashMap<String, Value>>>();
+                        let body = json!({
+                         "status": "ok",
+                         "clients": clients,
+                         "count": clients.len()
+                        });
+                        write_response(&mut tcp_writer, &body)
+                            .await
+                            .unwrap_or_else(|e| {
+                                eprintln!("[ERROR] Failed to write response: {}", e)
+                            });
+                        return;
+                    }
                     const DEFAULT_TOKEN: &str = "my-secret-token";
                     let token = request_info
                         .headers
@@ -80,24 +101,15 @@ async fn supernode_handle(
                         )
                         .await;
                     } else {
-                        let content = format!("找不到客户端: {}", client_id);
-                        let response = format!(
-                            "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\n\r\n{}\r\n",
-                            content.len(),
-                            content
-                        );
-                        tcp_writer
-                            .write_all(response.as_bytes())
+                        let body = json!({
+                            "status": "error",
+                            "message": format!("找不到客户端: {}", client_id)
+                        });
+                        write_response(&mut tcp_writer, &body)
                             .await
                             .unwrap_or_else(|e| {
-                                eprintln!("[ERROR] Failed to write to TCP client: {}", e)
+                                eprintln!("[ERROR] Failed to write response: {}", e)
                             });
-                        tcp_writer.flush().await.unwrap_or_else(|e| {
-                            eprintln!("[ERROR] Failed to flush TCP client: {}", e)
-                        });
-                        tcp_writer.shutdown().await.unwrap_or_else(|e| {
-                            eprintln!("[ERROR] Failed to shutdown TCP client: {}", e)
-                        });
                     }
                 });
             }
@@ -107,4 +119,29 @@ async fn supernode_handle(
             }
         }
     }
+}
+
+async fn write_response(
+    tcp_writer: &mut tokio::net::tcp::OwnedWriteHalf,
+    body: &Value,
+) -> anyhow::Result<()> {
+    let body_str = serde_json::to_string(body)?;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-cache\r\n\r\n{}",
+        body_str.as_bytes().len(),
+        body_str
+    );
+    tcp_writer
+        .write_all(response.as_bytes())
+        .await
+        .unwrap_or_else(|e| eprintln!("[ERROR] Failed to write to TCP client: {}", e));
+    tcp_writer
+        .flush()
+        .await
+        .unwrap_or_else(|e| eprintln!("[ERROR] Failed to flush TCP client: {}", e));
+    tcp_writer
+        .shutdown()
+        .await
+        .unwrap_or_else(|e| eprintln!("[ERROR] Failed to shutdown TCP client: {}", e));
+    Ok(())
 }

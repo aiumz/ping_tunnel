@@ -17,11 +17,11 @@ pub struct ConnectionSession {
 }
 #[allow(dead_code)]
 impl ConnectionSession {
-    pub fn new(conn: quinn::Connection) -> Self {
+    pub fn new(conn: quinn::Connection, meta: TunnelMeta) -> Self {
         Self {
             conn,
             ping_at: Instant::now(),
-            meta: TunnelMeta::new(),
+            meta,
         }
     }
     pub fn set_meta(&mut self, key: &str, value: &Value) {

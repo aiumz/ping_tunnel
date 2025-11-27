@@ -7,7 +7,7 @@ use bytes::Bytes;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-const BUF_SZ: usize = 8192;
+const BUF_SZ: usize = 64 * 1024;
 pub async fn quic_to_tcp(
     forward_to: &str,
     mut recv: quinn::RecvStream,
@@ -32,9 +32,10 @@ pub async fn quic_to_tcp(
     };
 
     let (mut tcp_reader, mut tcp_writer) = tcp_stream.into_split();
+    // 接收 QUIC 数据并写入 TCP 客户端
     tokio::spawn(async move {
         loop {
-            match recv.read_chunk(BUF_SZ, true).await {
+            match recv.read_chunk(BUF_SZ, false).await {
                 Ok(Some(chunk)) => {
                     if let Err(e) = tcp_writer.write_all(&chunk.bytes).await {
                         eprintln!("[FORWARD] TCP write error: {}", e);
@@ -42,6 +43,10 @@ pub async fn quic_to_tcp(
                     }
                 }
                 Ok(None) => {
+                    if let Err(e) = tcp_writer.flush().await {
+                        eprintln!("[FORWARD] TCP flush error: {}", e);
+                        break;
+                    }
                     break;
                 }
                 Err(e) => {
@@ -50,7 +55,11 @@ pub async fn quic_to_tcp(
                 }
             }
         }
+        if let Err(e) = tcp_writer.shutdown().await {
+            eprintln!("[FORWARD] Failed to shutdown TCP writer: {}", e);
+        }
     });
+    // 发送 TCP 数据到 QUIC
     tokio::spawn(async move {
         let mut buf = [0u8; BUF_SZ];
         loop {
@@ -90,6 +99,7 @@ pub async fn tcp_to_quic(
             return;
         }
     };
+    // 发送 TCP 数据到 QUIC
     tokio::spawn(async move {
         let meta = HashMap::from([(FORWARD_TO_KEY.to_string(), Value::String(forward_to))]);
         let header = TunnelCommandPacket::new(TunnelCommand::Forward, &meta).to_bytes();
@@ -122,9 +132,10 @@ pub async fn tcp_to_quic(
         }
     });
 
+    // 接收 QUIC 数据并写入 TCP 客户端
     tokio::spawn(async move {
         loop {
-            match recv.read_chunk(BUF_SZ, true).await {
+            match recv.read_chunk(BUF_SZ, false).await {
                 Ok(Some(chunk)) => {
                     if let Err(e) = tcp_writer.write_all(&chunk.bytes).await {
                         eprintln!("[ERROR] Failed to write to HTTP client: {}", e);
@@ -132,6 +143,10 @@ pub async fn tcp_to_quic(
                     }
                 }
                 Ok(None) => {
+                    if let Err(e) = tcp_writer.flush().await {
+                        eprintln!("[ERROR] Failed to flush TCP writer: {}", e);
+                        break;
+                    }
                     break;
                 }
                 Err(e) => {
@@ -139,6 +154,10 @@ pub async fn tcp_to_quic(
                     break;
                 }
             }
+        }
+
+        if let Err(e) = tcp_writer.shutdown().await {
+            eprintln!("[ERROR] Failed to shutdown TCP writer: {}", e);
         }
     });
 }
@@ -148,29 +167,28 @@ pub async fn command_to_quic(
     command: TunnelCommand,
     meta: &TunnelMeta,
 ) -> Result<TunnelCommandPacket, anyhow::Error> {
-    // 增加超时处理
     match tokio::time::timeout(Duration::from_secs(5), async {
         let (mut send, mut recv) = match conn.open_bi().await {
             Ok(streams) => streams,
             Err(e) => {
-                println!("[ERROR] Failed to open bidirectional stream: {}", e);
+                eprintln!("[ERROR] Failed to open bidirectional stream: {}", e);
                 return Err(anyhow::anyhow!(e.to_string()));
             }
         };
         let packet = TunnelCommandPacket::new(command, meta).to_bytes();
         if let Err(e) = send.write_chunk(Bytes::from(packet.clone())).await {
-            println!("[ERROR] Failed to write chunk to QUIC: {}", e);
+            eprintln!("[ERROR] Failed to write chunk to QUIC: {}", e);
             return Err(anyhow::anyhow!(e.to_string()));
         }
         if let Err(e) = send.finish() {
-            println!("[ERROR] Failed to finish QUIC send stream: {}", e);
+            eprintln!("[ERROR] Failed to finish QUIC send stream: {}", e);
             return Err(anyhow::anyhow!(e.to_string()));
         }
         let read_result = TunnelCommandPacket::read_command(&mut recv).await;
         match read_result {
             Ok(packet) => Ok(packet),
             Err(e) => {
-                println!("[ERROR] Failed to read tunnel header: {}", e);
+                eprintln!("[ERROR] Failed to read tunnel header: {}", e);
                 Err(anyhow::anyhow!(e))
             }
         }
@@ -179,7 +197,7 @@ pub async fn command_to_quic(
     {
         Ok(result) => result,
         Err(e) => {
-            println!("[ERROR] Command to QUIC timeout: {}", e);
+            eprintln!("[ERROR] Command to QUIC timeout: {}", e);
             Err(anyhow::anyhow!(e))
         }
     }
