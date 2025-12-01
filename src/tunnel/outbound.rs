@@ -1,6 +1,6 @@
+use crate::transport::base::TransportStream;
 use crate::tunnel::common::FORWARD_TO_KEY;
 use crate::tunnel::packet::TunnelCommandPacket;
-use crate::transport::base::TransportStream;
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 
@@ -10,15 +10,12 @@ pub async fn forward_to_tcp(
     packet: TunnelCommandPacket,
     default_forward_to: Option<String>,
 ) -> anyhow::Result<()> {
-    let forward_target = match packet.meta.get(FORWARD_TO_KEY).and_then(|v| v.as_str()) {
-        Some(forward_to) => forward_to.to_string(),
-        None => {
-            if let Some(forward_to) = default_forward_to {
-                forward_to
-            } else {
-                "".to_string()
-            }
-        }
+    let forward_target = match default_forward_to {
+        Some(forward_to) => forward_to,
+        None => match packet.meta.get(FORWARD_TO_KEY).and_then(|v| v.as_str()) {
+            Some(forward_to) => forward_to.to_string(),
+            None => "".to_string(),
+        },
     };
     println!("[QUIC Client] Forwarding to: {}", forward_target);
     let upstream = TcpStream::connect(forward_target).await?;

@@ -1,15 +1,38 @@
 use crate::transport::base::{ClientConfig, TransformClient};
 use crate::transport::quic::QuinnClientEndpoint;
 use crate::tunnel::common::AUTH_TOKEN_KEY;
+use crate::tunnel::inbound::{InboundConfig, bind_tcp_inbound};
 use crate::tunnel::outbound::forward_to_tcp;
 use crate::tunnel::packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta};
 use crate::tunnel::session::DEFAULT_CLIENT_ID;
-use crate::tunnel::session::{TransportSession, TRANSPORT_SESSION_MAP, get_default_session};
+use crate::tunnel::session::{TRANSPORT_SESSION_MAP, TransportSession, get_default_session};
 use serde_json::Value;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
-pub async fn connect_to_server(
+pub async fn start_client(
+    server_addr: String,
+    token: String,
+    forward_to: String,
+) -> anyhow::Result<()> {
+    tokio::select! {
+        result = start_transport(server_addr, token, forward_to) => {
+            if let Err(e) = result {
+                eprintln!("Transport error: {:?}", e);
+            }
+        }
+        result = bind_tcp_inbound(InboundConfig {
+            inbound_addr: "127.0.0.1:0".to_string(),
+        }) => {
+            if let Err(e) = result {
+                eprintln!("Inbound error: {:?}", e);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn start_transport(
     server_addr: String,
     token: String,
     forward_to: String,
@@ -17,7 +40,6 @@ pub async fn connect_to_server(
     let config = ClientConfig {
         addr: server_addr.clone(),
     };
-
     println!("Connecting to server...");
     let mut is_connected = false;
     const SLEEP_TIME: Duration = Duration::from_secs(10);
@@ -73,8 +95,7 @@ pub async fn connect_to_server(
                         .accept(move |stream| {
                             let forward_to = forward_to.clone();
                             async move {
-                                let (mut stream_reader, stream_writer) =
-                                    tokio::io::split(stream);
+                                let (mut stream_reader, stream_writer) = tokio::io::split(stream);
                                 let packet =
                                     TunnelCommandPacket::read_command1(&mut stream_reader).await?;
                                 println!("[QUIC Client] Received command: {:?}", packet);

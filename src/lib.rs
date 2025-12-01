@@ -22,32 +22,6 @@ use tokio::runtime::Handle;
 
 #[cfg(feature = "napi")]
 #[napi]
-pub fn connect_to_server(
-    server_addr: String,
-    token: String,
-    forward_to: String,
-) -> napi::Result<()> {
-    match Handle::try_current() {
-        Ok(handle) => {
-            handle.spawn(async move {
-                let _ =
-                    crate::tunnel::edge::connect_to_server(server_addr, token, forward_to).await;
-            });
-        }
-        Err(_) => {
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-                let _ = rt.block_on(async {
-                    crate::tunnel::edge::connect_to_server(server_addr, token, forward_to).await
-                });
-            });
-        }
-    }
-    Ok(())
-}
-
-#[cfg(feature = "napi")]
-#[napi]
 pub struct EdgeClient {
     server_addr: String,
     token: String,
@@ -74,8 +48,7 @@ impl EdgeClient {
         match Handle::try_current() {
             Ok(handle) => {
                 handle.spawn(async move {
-                    let _ = crate::tunnel::edge::connect_to_server(server_addr, token, forward_to)
-                        .await;
+                    let _ = crate::tunnel::edge::start_client(server_addr, token, forward_to).await;
                 });
             }
             Err(_) => {
@@ -83,7 +56,7 @@ impl EdgeClient {
                     let rt =
                         tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
                     let _ = rt.block_on(async {
-                        crate::tunnel::edge::connect_to_server(server_addr, token, forward_to).await
+                        crate::tunnel::edge::start_client(server_addr, token, forward_to).await
                     });
                 });
             }
@@ -97,7 +70,10 @@ impl EdgeClient {
     }
 
     #[napi]
-    pub fn invoke(&self, _command: String, _data: String) -> napi::Result<String> {
-        Ok("".to_string())
+    pub async fn get_inbound_addr(&self) -> napi::Result<String> {
+        Ok(crate::tunnel::inbound::TCP_INBOUND_ADDR
+            .read()
+            .await
+            .clone())
     }
 }

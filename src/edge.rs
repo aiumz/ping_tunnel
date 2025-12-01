@@ -1,4 +1,4 @@
-use ping_tunnel::tunnel::edge::connect_to_server;
+use ping_tunnel::tunnel::edge::start_client;
 use std::env;
 
 #[tokio::main]
@@ -13,5 +13,5 @@ async fn main() -> anyhow::Result<()> {
     let server_addr = args[1].clone();
     let token = args[2].clone();
     let forward_to = args[3].clone();
-    connect_to_server(server_addr, token, forward_to).await
+    start_client(server_addr, token, forward_to).await
 }

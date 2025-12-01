@@ -1,6 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
-use tokio::io::AsyncWriteExt;
+use serde_json::{Value, json};
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
 use tokio::net::TcpListener;
+use tokio::{io::AsyncWriteExt, sync::RwLock};
 
 use crate::{
     tunnel::session::{TRANSPORT_SESSION_MAP, get_default_session, get_session},
@@ -10,7 +14,9 @@ use crate::{
         sniff,
     },
 };
-use serde_json::{Value, json};
+
+pub static TCP_INBOUND_ADDR: LazyLock<Arc<RwLock<String>>> =
+    LazyLock::new(|| Arc::new(RwLock::new(String::new())));
 
 pub struct InboundConfig {
     pub inbound_addr: String,
@@ -23,7 +29,10 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
     let listener = TcpListener::bind(config.inbound_addr.clone())
         .await
         .unwrap();
-    println!("监听端口 {}，等待连接...", config.inbound_addr);
+    if let Ok(addr) = listener.local_addr() {
+        *TCP_INBOUND_ADDR.write().await = addr.to_string();
+        println!("tcp inbound addr: {}", TCP_INBOUND_ADDR.read().await);
+    }
     while let Ok((stream, _addr)) = listener.accept().await {
         tokio::spawn(async move {
             let (mut tcp_recv, mut tcp_send) = stream.into_split();
@@ -35,69 +44,27 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
                 }
             };
             println!("request_info: {:?}", request_info);
-
-            {
-                if request_info.method == "GET" && request_info.url == "/__internal__/clients" {
-                    let clients = TRANSPORT_SESSION_MAP
-                        .iter()
-                        .filter(|k| k.value().ping_at.elapsed().as_secs() < 30)
-                        .map(|k| {
-                            let meta = &k.value().meta;
-                            meta.clone()
-                        })
-                        .collect::<Vec<HashMap<String, Value>>>();
-                    let body = json!({
-                        "status": "ok",
-                        "clients": clients,
-                        "count": clients.len()
-                    });
-                    if let Err(e) = json_response(&mut tcp_send, &body).await {
-                        eprintln!("Failed to write response: {}", e);
-                        return;
-                    }
-                    return;
-                }
-            }
-
-            const DEFAULT_TOKEN: &str = "my-secret-token";
-            let token = request_info
-                .headers
-                .get(AUTH_TOKEN_KEY)
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| DEFAULT_TOKEN.to_string());
-
-            let client_id = get_client_id_from_token(&token);
-
-            println!("client_id: {:?}", client_id);
-            let session = get_default_session().or_else(|| get_session(&client_id));
+            let tunnel_id = request_info.tunnel_id.clone();
+            let session = get_default_session().or_else(|| get_session(&tunnel_id));
             println!("session: {:?}", session.is_some());
             if let Some(session) = session {
                 let upstream_stream = match session.conn.open_stream().await {
                     Ok(stream) => stream,
                     Err(e) => {
                         eprintln!("open_stream error: {:?}", e);
-                        TRANSPORT_SESSION_MAP.remove(&client_id);
+                        TRANSPORT_SESSION_MAP.remove(&tunnel_id);
                         return;
                     }
                 };
                 let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream_stream);
 
-                let forward_to = request_info
-                    .headers
-                    .get(FORWARD_TO_KEY)
-                    .map(|s| s.to_string())
-                    .unwrap_or_default();
-
-                println!("Forwarding HTTP request to: {}", forward_to);
+                println!("Forwarding HTTP request to: {}", request_info.host);
 
                 tokio::spawn(async move {
-                    let mut meta = TunnelMeta::new();
-                    if !forward_to.is_empty() {
-                        meta.insert(
-                            FORWARD_TO_KEY.to_string(),
-                            Value::String(forward_to.clone()),
-                        );
-                    }
+                    let meta = TunnelMeta::from([(
+                        FORWARD_TO_KEY.to_string(),
+                        Value::String(request_info.host.clone()),
+                    )]);
                     let command = TunnelCommandPacket::new(TunnelCommand::Forward, &meta);
                     println!("Sending Forward command: {:?}", command);
                     if let Err(e) = upstream_writer.write_all(&command.to_bytes()).await {
@@ -125,6 +92,15 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
                         eprintln!("shutdown stream_writer error: {:?}", e);
                     }
                 });
+            } else {
+                let _ = json_response(
+                    &mut tcp_send,
+                    &json!({
+                        "code": 404,
+                        "message": format!("tunnel [{}] not online", tunnel_id),
+                    }),
+                )
+                .await;
             }
         });
     }

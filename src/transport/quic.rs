@@ -196,16 +196,27 @@ impl TransformClient for QuinnClientEndpoint {
 
         loop {
             println!("Connecting to Server: {} ...", config.addr);
+            let addr = match config.addr.parse() {
+                Ok(addr) => addr,
+                Err(e) => {
+                    eprintln!("Invalid server address: {}", e);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
             let conn = match tokio::time::timeout(Duration::from_secs(10), async {
-                let connecting = endpoint.connect(config.addr.parse().unwrap(), "localhost");
+                let connecting = endpoint.connect(addr, "localhost");
                 let connecting = match connecting {
                     Ok(connecting) => connecting,
-                    Err(e) => return Err(anyhow::anyhow!(e)),
+                    Err(e) => {
+                        eprintln!("Connection error: {}", e);
+                        return Err(anyhow::anyhow!(e));
+                    }
                 };
-                match connecting.await {
-                    Ok(conn) => Ok(conn),
-                    Err(e) => return Err(anyhow::anyhow!(e)),
-                }
+                connecting.await.map_err(|e| {
+                    eprintln!("Connection handshake error: {}", e);
+                    anyhow::anyhow!(e)
+                })
             })
             .await
             {
@@ -218,8 +229,11 @@ impl TransformClient for QuinnClientEndpoint {
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                     continue;
                 }
-                Err(_e) => {
-                    eprintln!("Connection timeout, retrying in 2 seconds... ");
+                Err(e) => {
+                    eprintln!(
+                        "Connection timeout after 10s: {:?}, retrying in 2 seconds...",
+                        e
+                    );
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                     continue;
                 }

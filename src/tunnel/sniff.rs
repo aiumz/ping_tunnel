@@ -1,51 +1,98 @@
+use anyhow::Result;
 use httparse::Request;
+use rustls::server::Acceptor;
 use std::collections::HashMap;
+use std::io::Cursor;
+use tokio::net::tcp::OwnedReadHalf;
+
 #[derive(Debug)]
-pub struct HttpRequestInfo {
-    pub method: String,
-    pub url: String,
-    pub http_version: String,
-    pub headers: HashMap<String, String>,
-    pub body_size: usize,
+pub struct SniffResult {
+    pub tunnel_id: String,
+    pub host: String,
+    pub is_https: bool,
 }
 
-pub async fn sniff_tcp(
-    tcp_stream: &mut tokio::net::tcp::OwnedReadHalf,
-) -> anyhow::Result<HttpRequestInfo> {
-    let mut peek_buffer = [0; 2048];
-    let n = tcp_stream.peek(&mut peek_buffer).await.map_or(0, |n| n);
+pub async fn sniff_tcp(tcp_stream: &mut OwnedReadHalf) -> Result<SniffResult> {
+    let mut peek_buffer = [0u8; 4096];
+    let n = tcp_stream.peek(&mut peek_buffer).await?;
     if n == 0 {
         return Err(anyhow::anyhow!("No data available"));
     }
+    let data = &peek_buffer[..n];
+    if let Some(result) = sniff_http(data) {
+        return Ok(result);
+    }
+    if let Some(result) = sniff_tls_sni_safe(&peek_buffer[..n])? {
+        return Ok(result);
+    }
+
+    Err(anyhow::anyhow!("Cannot sniff host"))
+}
+fn sniff_http(buf: &[u8]) -> Option<SniffResult> {
     let mut headers = [httparse::EMPTY_HEADER; 32];
     let mut request = Request::new(&mut headers);
-    let parsed = request.parse(&peek_buffer[..n]);
-    match parsed {
-        Ok(httparse::Status::Complete(_)) => {
-            let headers = request
-                .headers
-                .iter()
-                .map(|h| {
-                    (
-                        h.name.to_string(),
-                        String::from_utf8_lossy(h.value).to_string(),
-                    )
-                })
-                .collect::<HashMap<String, String>>();
-            let request_info = HttpRequestInfo {
-                method: request.method.unwrap_or("GET").to_string(),
-                url: request.path.unwrap_or("/").to_string(),
-                http_version: request.version.unwrap_or(1).to_string(),
-                headers: headers.clone(),
-                body_size: headers
-                    .get("Content-Length")
-                    .unwrap_or(&String::from("0"))
-                    .parse::<usize>()
-                    .unwrap_or(0),
-            };
-            Ok(request_info)
+
+    if let Ok(httparse::Status::Complete(_)) = request.parse(buf) {
+        let headers_map: HashMap<_, _> = request
+            .headers
+            .iter()
+            .map(|h| {
+                (
+                    h.name.to_string(),
+                    String::from_utf8_lossy(h.value).to_string(),
+                )
+            })
+            .collect();
+
+        let host_header = headers_map
+            .get("Host")
+            .unwrap_or(&"my-secret-token.localhost".to_string())
+            .to_string();
+
+        let host = if host_header.contains(':') {
+            host_header.clone()
+        } else {
+            format!("{}:80", host_header)
+        };
+
+        let host_without_port = host_header.split(':').next().unwrap_or(&host_header);
+
+        return Some(SniffResult {
+            tunnel_id: host_without_port
+                .split('.')
+                .next()
+                .unwrap_or("my-secret-token")
+                .to_string(),
+            host,
+            is_https: false,
+        });
+    }
+    None
+}
+
+fn sniff_tls_sni_safe(buf: &[u8]) -> Result<Option<SniffResult>> {
+    let mut acceptor = Acceptor::default();
+    let mut cursor = Cursor::new(buf);
+
+    acceptor.read_tls(&mut cursor)?;
+    match acceptor.accept() {
+        Ok(Some(accepted)) => {
+            if let Some(sni) = accepted.client_hello().server_name() {
+                let host_without_port = sni.to_string();
+                let host = format!("{}:443", host_without_port);
+                return Ok(Some(SniffResult {
+                    tunnel_id: host_without_port
+                        .split('.')
+                        .next()
+                        .unwrap_or("my-secret-token")
+                        .to_string(),
+                    host,
+                    is_https: true,
+                }));
+            }
+            Ok(None)
         }
-        Ok(httparse::Status::Partial) => Err(anyhow::anyhow!("Failed to parse request1")),
-        Err(e) => Err(anyhow::anyhow!("Failed to parse request: {}", e)),
+        Ok(None) => Ok(None),
+        Err((e, _alert)) => Err(anyhow::anyhow!("TLS parse error: {:?}", e)),
     }
 }
