@@ -1,5 +1,6 @@
-use ping_tunnel::lib;
+use ping_tunnel::tunnel::edge::start_client;
 use std::env;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -12,6 +13,5 @@ async fn main() -> anyhow::Result<()> {
     let server_addr = args[1].clone();
     let token = args[2].clone();
     let forward_to = args[3].clone();
-    lib::client::connect_to_server(server_addr, token, forward_to).await;
-    Ok(())
+    start_client(server_addr, token, forward_to).await
 }

@@ -2,12 +2,16 @@ use rustls::ClientConfig as RustlsClientConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
+
+static CRYPTO_PROVIDER_INIT: Once = Once::new();
 
 pub fn install_default_crypto_provider() {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install default crypto provider");
+    CRYPTO_PROVIDER_INIT.call_once(|| {
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("Failed to install default crypto provider");
+    });
 }
 
 pub fn load_cert(
@@ -31,16 +35,13 @@ pub fn load_cert(
     }
 
     println!("Loading certificate from {} and {}", cert_path, key_path);
-    // 从文件加载证书
     let cert_pem = fs::read(&cert_path)?;
     let key_pem = fs::read(&key_path)?;
-    // 解析 PEM 格式的证书
     let cert_der = rustls_pemfile::certs(&mut cert_pem.as_slice())
         .next()
         .ok_or_else(|| anyhow::anyhow!("No certificate found in {}", cert_path))??;
     let cert_der = CertificateDer::from(cert_der);
 
-    // 解析 PEM 格式的私钥
     let key_der = rustls_pemfile::pkcs8_private_keys(&mut key_pem.as_slice())
         .next()
         .ok_or_else(|| anyhow::anyhow!("No private key found in {}", key_path))??;
