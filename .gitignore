@@ -12,3 +12,4 @@ scripts/
 .env.development.local
 .env.test.local
 node-sdk/*.node
+build/

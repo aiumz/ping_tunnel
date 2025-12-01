@@ -1,6 +1,5 @@
 use httparse::Request;
 use std::collections::HashMap;
-/// HTTP 请求信息结构
 #[derive(Debug)]
 pub struct HttpRequestInfo {
     pub method: String,

@@ -1,18 +1,26 @@
-// 导出 lib 模块（用于二进制文件）
-pub mod lib {
-    pub mod cert;
-    pub mod client;
+pub mod tunnel {
     pub mod common;
-    pub mod connections;
-    pub mod forward;
+    pub mod edge;
+    pub mod inbound;
+    pub mod outbound;
     pub mod packet;
-    pub mod server;
+    pub mod session;
     pub mod sniff;
+    pub mod supernode;
 }
 
+pub mod transport {
+    pub mod base;
+    pub mod cert;
+    pub mod quic;
+}
+
+#[cfg(feature = "napi")]
 use napi_derive::napi;
+#[cfg(feature = "napi")]
 use tokio::runtime::Handle;
 
+#[cfg(feature = "napi")]
 #[napi]
 pub fn connect_to_server(
     server_addr: String,
@@ -22,14 +30,15 @@ pub fn connect_to_server(
     match Handle::try_current() {
         Ok(handle) => {
             handle.spawn(async move {
-                lib::client::connect_to_server(server_addr, token, forward_to).await;
+                let _ =
+                    crate::tunnel::edge::connect_to_server(server_addr, token, forward_to).await;
             });
         }
         Err(_) => {
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-                rt.block_on(async {
-                    lib::client::connect_to_server(server_addr, token, forward_to).await
+                let _ = rt.block_on(async {
+                    crate::tunnel::edge::connect_to_server(server_addr, token, forward_to).await
                 });
             });
         }
@@ -37,6 +46,7 @@ pub fn connect_to_server(
     Ok(())
 }
 
+#[cfg(feature = "napi")]
 #[napi]
 pub struct EdgeClient {
     server_addr: String,
@@ -44,6 +54,7 @@ pub struct EdgeClient {
     forward_to: String,
 }
 
+#[cfg(feature = "napi")]
 #[napi]
 impl EdgeClient {
     #[napi(constructor)]
@@ -63,15 +74,16 @@ impl EdgeClient {
         match Handle::try_current() {
             Ok(handle) => {
                 handle.spawn(async move {
-                    lib::client::connect_to_server(server_addr, token, forward_to).await;
+                    let _ = crate::tunnel::edge::connect_to_server(server_addr, token, forward_to)
+                        .await;
                 });
             }
             Err(_) => {
                 std::thread::spawn(move || {
                     let rt =
                         tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-                    rt.block_on(async {
-                        lib::client::connect_to_server(server_addr, token, forward_to).await
+                    let _ = rt.block_on(async {
+                        crate::tunnel::edge::connect_to_server(server_addr, token, forward_to).await
                     });
                 });
             }

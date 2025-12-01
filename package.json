@@ -26,8 +26,8 @@
     }
   },
   "scripts": {
-    "build": "napi build --platform --release -o ./build",
-    "build:debug": "napi build --platform",
+    "build": "napi build --platform --release --features napi -o ./build",
+    "build:debug": "napi build --platform --features napi",
     "build:all": "echo 'Please build for all platforms manually or use CI/CD'",
     "artifacts": "napi artifacts",
     "version": "napi version",
