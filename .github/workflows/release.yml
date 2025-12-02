@@ -56,8 +56,16 @@ jobs:
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
-          napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
-          mv dist/${{ matrix.artifact_name }}/ping_tunnel.node dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
+          npm install
+          napi build --release --target ${{ matrix.rust_target }} --features napi -o dist/${{ matrix.artifact_name }}
+          NODE_FILE=$(find dist/${{ matrix.artifact_name }} -name "ping_tunnel.*.node" -type f | head -1)
+          if [[ -n "$NODE_FILE" ]]; then
+            mv "$NODE_FILE" dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
+          else
+            echo "Error: .node file not found in dist/${{ matrix.artifact_name }}"
+            ls -la dist/${{ matrix.artifact_name }}/
+            exit 1
+          fi
       - name: Build binaries (Linux/Mac)
         if: matrix.os != 'windows-latest'
         env:
@@ -76,8 +84,16 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "dist\${{ matrix.artifact_name }}"
           $env:PATH = "$env:PATH;$env:ProgramFiles\nodejs"
-          napi build --release --target ${{ matrix.rust_target }} -o "dist\${{ matrix.artifact_name }}"
-          Move-Item -Path "dist\${{ matrix.artifact_name }}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.node"
+          npm install
+          napi build --release --target ${{ matrix.rust_target }} --features napi -o "dist\${{ matrix.artifact_name }}"
+          $nodeFile = Get-ChildItem -Path "dist\${{ matrix.artifact_name }}" -Filter "ping_tunnel.*.node" | Select-Object -First 1
+          if ($nodeFile) {
+            Move-Item -Path $nodeFile.FullName -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.node"
+          } else {
+            Write-Host "Error: .node file not found in dist\${{ matrix.artifact_name }}"
+            Get-ChildItem -Path "dist\${{ matrix.artifact_name }}"
+            exit 1
+          }
       - name: Build binaries (Windows)
         if: matrix.os == 'windows-latest'
         env:
