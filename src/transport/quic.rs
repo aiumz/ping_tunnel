@@ -131,7 +131,6 @@ impl TransformServer for QuinnServerEndpoint {
         if let Some(endpoint) = self.endpoint.as_ref() {
             println!("[QUIC Server] Endpoint started, waiting for new QUIC connections...");
             loop {
-                // 使用 loop + match 而不是 while let，以便更好地处理 None 情况
                 match endpoint.accept().await {
                     Some(connecting) => {
                         let callback = callback.clone();
@@ -147,11 +146,6 @@ impl TransformServer for QuinnServerEndpoint {
                                         let conn_for_accept = conn.clone();
                                         match conn_for_accept.accept_bi().await {
                                             Ok((send, recv)) => {
-                                                let remote = conn_for_accept.remote_address();
-                                                println!(
-                                                    "[QUIC Server] accept_bi ok: new bi-stream from {}",
-                                                    remote
-                                                );
                                                 let callback = callback.clone();
                                                 let conn_for_callback = conn_box.clone();
                                                 tokio::spawn(async move {
@@ -178,7 +172,6 @@ impl TransformServer for QuinnServerEndpoint {
                                 }
                                 Err(e) => {
                                     eprintln!("[ERROR] Connection handshake failed: {:?}", e);
-                                    // 不 return，让外层循环继续等待新连接
                                 }
                             }
                         });
@@ -187,7 +180,6 @@ impl TransformServer for QuinnServerEndpoint {
                         eprintln!(
                             "[QUIC Server] endpoint.accept() returned None, endpoint may be closed"
                         );
-                        // 如果 endpoint 被关闭，退出循环
                         break;
                     }
                 }

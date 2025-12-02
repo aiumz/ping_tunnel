@@ -1,18 +1,11 @@
 use serde_json::{Value, json};
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock},
-};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::sync::{Arc, LazyLock};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tokio::time::{Duration, timeout};
-use tokio::{
-    io::{self, AsyncRead, AsyncWrite},
-    sync::RwLock,
-};
+use tokio::sync::RwLock;
 
 use crate::tunnel::{
-    common::{AUTH_TOKEN_KEY, FORWARD_TO_KEY, copy_buffer, get_client_id_from_token},
+    common::{FORWARD_TO_KEY, copy_buffer},
     packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta},
     session::{TRANSPORT_SESSION_MAP, get_default_session, get_session},
     sniff,
@@ -51,6 +44,11 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
             let session = get_default_session().or_else(|| get_session(&tunnel_id));
             println!("session: {:?}", session.is_some());
             if let Some(session) = session {
+                if session.ping_at.elapsed().as_secs() > 60 {
+                    eprintln!("session timeout, will remove session");
+                    TRANSPORT_SESSION_MAP.remove(&tunnel_id);
+                    return;
+                }
                 let upstream_stream = match session.conn.open_stream().await {
                     Ok(stream) => stream,
                     Err(e) => {
@@ -74,13 +72,13 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
                         eprintln!("Failed to send Forward command: {:?}", e);
                         return;
                     }
-                    if let Err(e) = copy_buffer(&mut tcp_recv, &mut upstream_writer).await {
+                    if let Err(e) = tokio::io::copy(&mut tcp_recv, &mut upstream_writer).await {
                         eprintln!("copy stream -> upstream error: {:?}", e);
                     }
                     upstream_writer.shutdown().await.ok();
                 });
                 let transport_to_tcp = tokio::spawn(async move {
-                    if let Err(e) = copy_buffer(&mut upstream_reader, &mut tcp_send).await {
+                    if let Err(e) = tokio::io::copy(&mut upstream_reader, &mut tcp_send).await {
                         eprintln!("copy upstream -> stream error: {:?}", e);
                     }
                     tcp_send.shutdown().await.ok();

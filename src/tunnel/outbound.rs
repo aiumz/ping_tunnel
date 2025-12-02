@@ -21,12 +21,12 @@ pub async fn forward_to_tcp(
     let upstream = TcpStream::connect(forward_target).await?;
     let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream);
     let stream_to_upstream = tokio::spawn(async move {
-        if let Err(e) = copy_buffer(&mut stream_reader, &mut upstream_writer).await {
+        if let Err(e) = tokio::io::copy(&mut stream_reader, &mut upstream_writer).await {
             eprintln!("[QUIC Client] copy stream -> upstream error: {:?}", e);
         }
     });
     let upstream_to_stream = tokio::spawn(async move {
-        if let Err(e) = copy_buffer(&mut upstream_reader, &mut stream_writer).await {
+        if let Err(e) = tokio::io::copy(&mut upstream_reader, &mut stream_writer).await {
             eprintln!("[QUIC Client] copy upstream -> stream error: {:?}", e);
         }
     });
