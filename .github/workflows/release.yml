@@ -43,10 +43,9 @@ jobs:
       - name: Install napi CLI
         run: npm install -g @napi-rs/cli
 
-      - name: Install cross (for Linux musl)
+      - name: Install cross
         if: matrix.os == 'ubuntu-latest'
-        run: |
-          cargo install cross
+        run: cargo install cross --version 0.3.28
 
       # Build Node 插件 (Linux/macOS)
       - name: Build .node (Linux/Mac)
@@ -56,12 +55,11 @@ jobs:
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            cross build --release --target ${{ matrix.rust_target }}
+            cross build --release --target ${{ matrix.rust_target }} --package ping_tunnel
           else
-            cargo build --release --target ${{ matrix.rust_target }}
+            cargo build --release --target ${{ matrix.rust_target }} --package ping_tunnel
           fi
-          napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
-          mv dist/${{ matrix.artifact_name }}/ping_tunnel.node dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
+          mv target/${{ matrix.rust_target }}/release/ping_tunnel.node dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
 
       # Build Rust 可执行文件 (Linux/macOS)
       - name: Build binaries (Linux/Mac)
