@@ -1,5 +1,5 @@
 use crate::transport::base::TransportStream;
-use crate::tunnel::common::{FORWARD_TO_KEY, copy_buffer};
+use crate::tunnel::common::FORWARD_TO_KEY;
 use crate::tunnel::packet::TunnelCommandPacket;
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;

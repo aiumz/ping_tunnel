@@ -68,7 +68,6 @@ impl TransportConnection for QuinnConnection {
         TransportKind::QUIC
     }
     async fn open_stream(&self) -> anyhow::Result<Box<dyn TransportStream>> {
-        // 检查连接是否已关闭
         if let Some(reason) = self.conn.close_reason() {
             return Err(anyhow::anyhow!("Connection closed: {:?}", reason));
         }
