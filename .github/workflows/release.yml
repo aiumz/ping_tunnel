@@ -45,18 +45,20 @@ jobs:
 
       # Linux 静态编译依赖
       - name: Install cross-compilation tools (Linux MUSL)
-        if: matrix.rust_target == 'x86_64-unknown-linux-musl' || matrix.rust_target == 'aarch64-unknown-linux-musl'
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools gcc pkg-config libssl-dev
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu pkg-config libssl-dev
 
       # Build Node 插件 (Linux/macOS)
       - name: Build .node (Linux/Mac)
         if: matrix.os != 'windows-latest'
         env:
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+          CC_x86_64_unknown_linux_musl: x86_64-linux-musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: x86_64-linux-musl-gcc
+          CC_aarch64_unknown_linux_musl: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
           napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
@@ -66,9 +68,11 @@ jobs:
       - name: Build binaries (Linux/Mac)
         if: matrix.os != 'windows-latest'
         env:
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+          CC_x86_64_unknown_linux_musl: x86_64-linux-musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: x86_64-linux-musl-gcc
+          CC_aarch64_unknown_linux_musl: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
         run: |
           cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
           cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
@@ -84,7 +88,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist\${{ matrix.artifact_name }}"
           $env:PATH = "$env:PATH;$env:ProgramFiles\nodejs"
           napi build --release --target ${{ matrix.rust_target }} -o "dist\${{ matrix.artifact_name }}"
-          Move-Item -Path "dist\${{ matrix.artifact_name }}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name}}\edge-${{ matrix.artifact_name }}.node"
+          Move-Item -Path "dist\${{ matrix.artifact_name}}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name}}\edge-${{ matrix.artifact_name }}.node"
 
       # Build Rust 可执行文件 (Windows)
       - name: Build binaries (Windows)
