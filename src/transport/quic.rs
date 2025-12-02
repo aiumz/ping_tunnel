@@ -51,7 +51,7 @@ impl AsyncRead for QuinnStream {
 }
 impl TransportStream for QuinnStream {}
 pub struct QuinnConnection {
-    pub conn: Arc<quinn::Connection>,
+    pub conn: quinn::Connection,
 }
 
 #[async_trait::async_trait]
@@ -94,7 +94,7 @@ impl TransformServer for QuinnServerEndpoint {
 
         let mut transport_config = quinn::TransportConfig::default();
         transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
-        transport_config.max_idle_timeout(None);
+        transport_config.max_idle_timeout(Some(Duration::from_secs(120).try_into().unwrap()));
 
         let mut server_config =
             quinn::ServerConfig::with_crypto(std::sync::Arc::new(quic_server_config));
@@ -130,31 +130,46 @@ impl TransformServer for QuinnServerEndpoint {
                                 "[QUIC Server] Handshake completed, new connection from {}",
                                 remote
                             );
+
+                            let conn_box = Arc::new(QuinnConnection { conn: conn.clone() });
+
                             loop {
-                                let conn_box = Arc::new(QuinnConnection {
-                                    conn: Arc::new(conn.clone()),
-                                });
-                                match conn.accept_bi().await {
-                                    Ok((send, recv)) => {
-                                        let remote = conn.remote_address();
+                                let conn_for_accept = conn.clone();
+                                match tokio::time::timeout(
+                                    Duration::from_secs(30),
+                                    conn_for_accept.accept_bi(),
+                                )
+                                .await
+                                {
+                                    Ok(Ok((send, recv))) => {
+                                        let remote = conn_for_accept.remote_address();
                                         println!(
                                             "[QUIC Server] accept_bi ok: new bi-stream from {}",
                                             remote
                                         );
                                         let callback = callback.clone();
+                                        let conn_for_callback = conn_box.clone();
                                         tokio::spawn(async move {
                                             let _ = callback(
-                                                conn_box,
+                                                conn_for_callback,
                                                 Box::new(QuinnStream { send, recv }),
                                             )
                                             .await;
                                         });
                                     }
-                                    Err(e) => {
-                                        let remote = conn.remote_address();
+                                    Ok(Err(e)) => {
+                                        let remote = conn_for_accept.remote_address();
                                         eprintln!(
                                             "[QUIC Server] accept_bi failed for {}: {:?}",
                                             remote, e
+                                        );
+                                        break;
+                                    }
+                                    Err(elapsed) => {
+                                        let remote = conn_for_accept.remote_address();
+                                        eprintln!(
+                                            "[QUIC Server] accept_bi timeout for {}: {:?}",
+                                            remote, elapsed
                                         );
                                         break;
                                     }
@@ -181,7 +196,7 @@ impl TransformServer for QuinnServerEndpoint {
 }
 
 pub struct QuinnClientEndpoint {
-    pub conn: Arc<quinn::Connection>,
+    pub conn: quinn::Connection,
 }
 
 #[async_trait::async_trait]
@@ -261,9 +276,7 @@ impl TransformClient for QuinnClientEndpoint {
                     continue;
                 }
             };
-            return Ok(Arc::new(QuinnClientEndpoint {
-                conn: Arc::new(conn),
-            }));
+            return Ok(Arc::new(QuinnClientEndpoint { conn }));
         }
     }
 
