@@ -19,11 +19,7 @@
     "url": ""
   },
   "napi": {
-    "name": "ping_tunnel",
-    "triples": {
-      "defaults": true,
-      "additional": []
-    }
+    "binaryName": "ping_tunnel"
   },
   "scripts": {
     "build": "napi build --platform --release --features napi -o ./build",
@@ -36,7 +32,7 @@
     "supernode": "cargo run --bin supernode -- 0.0.0.0:4433 0.0.0.0:4432 ./cert/cert.pem ./cert/key.pem"
   },
   "dependencies": {
-    "@napi-rs/cli": "^3.4.1"
+    "@napi-rs/cli": "^3.5.0"
   },
   "engines": {
     "node": ">= 10"
