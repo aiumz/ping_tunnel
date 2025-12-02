@@ -3,7 +3,7 @@ use crate::transport::base::{
     TransportKind, TransportStream,
 };
 use crate::transport::cert::NoCertificateVerification;
-use quinn::{ClientConfig as QuinnClientConfig, Endpoint, RecvStream, SendStream};
+use quinn::{ClientConfig as QuinnClientConfig, Endpoint, RecvStream, SendStream, VarInt};
 use rustls::ClientConfig as RustlsClientConfig;
 use std::{
     pin::Pin,
@@ -102,7 +102,7 @@ impl TransformServer for QuinnServerEndpoint {
 
         let mut transport_config = quinn::TransportConfig::default();
         transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
-        transport_config.max_idle_timeout(Some(Duration::from_secs(120).try_into().unwrap()));
+        transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()));
 
         let mut server_config =
             quinn::ServerConfig::with_crypto(std::sync::Arc::new(quic_server_config));
@@ -140,16 +140,10 @@ impl TransformServer for QuinnServerEndpoint {
                             );
 
                             let conn_box = Arc::new(QuinnConnection { conn: conn.clone() });
-
                             loop {
                                 let conn_for_accept = conn.clone();
-                                match tokio::time::timeout(
-                                    Duration::from_secs(30),
-                                    conn_for_accept.accept_bi(),
-                                )
-                                .await
-                                {
-                                    Ok(Ok((send, recv))) => {
+                                match conn_for_accept.accept_bi().await {
+                                    Ok((send, recv)) => {
                                         let remote = conn_for_accept.remote_address();
                                         println!(
                                             "[QUIC Server] accept_bi ok: new bi-stream from {}",
@@ -165,19 +159,10 @@ impl TransformServer for QuinnServerEndpoint {
                                             .await;
                                         });
                                     }
-                                    Ok(Err(e)) => {
-                                        let remote = conn_for_accept.remote_address();
+                                    Err(e) => {
                                         eprintln!(
                                             "[QUIC Server] accept_bi failed for {}: {:?}",
                                             remote, e
-                                        );
-                                        break;
-                                    }
-                                    Err(elapsed) => {
-                                        let remote = conn_for_accept.remote_address();
-                                        eprintln!(
-                                            "[QUIC Server] accept_bi timeout for {}: {:?}",
-                                            remote, elapsed
                                         );
                                         break;
                                     }
