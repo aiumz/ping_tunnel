@@ -12,10 +12,10 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            rust_target: x86_64-unknown-linux-gnu
+            rust_target: x86_64-unknown-linux-musl
             artifact_name: linux-x64
           - os: ubuntu-latest
-            rust_target: aarch64-unknown-linux-gnu
+            rust_target: aarch64-unknown-linux-musl
             artifact_name: linux-arm
           - os: macos-latest
             rust_target: x86_64-apple-darwin
@@ -43,12 +43,14 @@ jobs:
       - name: Install napi CLI
         run: npm install -g @napi-rs/cli
 
-      - name: Install cross-compilation tools (Linux ARM)
-        if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
+      # Linux 静态编译依赖
+      - name: Install cross-compilation tools (Linux MUSL)
+        if: matrix.rust_target == 'x86_64-unknown-linux-musl' || matrix.rust_target == 'aarch64-unknown-linux-musl'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y musl-tools gcc pkg-config libssl-dev
 
+      # Build Node 插件 (Linux/macOS)
       - name: Build .node (Linux/Mac)
         if: matrix.os != 'windows-latest'
         env:
@@ -60,6 +62,7 @@ jobs:
           napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
           mv dist/${{ matrix.artifact_name }}/ping_tunnel.node dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
 
+      # Build Rust 可执行文件 (Linux/macOS)
       - name: Build binaries (Linux/Mac)
         if: matrix.os != 'windows-latest'
         env:
@@ -71,6 +74,7 @@ jobs:
           cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
           cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
 
+      # Build Node 插件 (Windows)
       - name: Build .node (Windows)
         if: matrix.os == 'windows-latest'
         env:
@@ -80,8 +84,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist\${{ matrix.artifact_name }}"
           $env:PATH = "$env:PATH;$env:ProgramFiles\nodejs"
           napi build --release --target ${{ matrix.rust_target }} -o "dist\${{ matrix.artifact_name }}"
-          Move-Item -Path "dist\${{ matrix.artifact_name }}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.node"
+          Move-Item -Path "dist\${{ matrix.artifact_name }}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name}}\edge-${{ matrix.artifact_name }}.node"
 
+      # Build Rust 可执行文件 (Windows)
       - name: Build binaries (Windows)
         if: matrix.os == 'windows-latest'
         env:
@@ -89,9 +94,10 @@ jobs:
         shell: powershell
         run: |
           cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
-          Copy-Item -Path "target\${{ matrix.rust_target }}\release\edge.exe" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.exe"
-          Copy-Item -Path "target\${{ matrix.rust_target }}\release\supernode.exe" -Destination "dist\${{ matrix.artifact_name }}\supernode-${{ matrix.artifact_name }}.exe"
+          Copy-Item -Path "target\${{ matrix.rust_target}}\release\edge.exe" -Destination "dist\${{ matrix.artifact_name}}\edge-${{ matrix.artifact_name }}.exe"
+          Copy-Item -Path "target\${{ matrix.rust_target}}\release\supernode.exe" -Destination "dist\${{ matrix.artifact_name}}\supernode-${{ matrix.artifact_name }}.exe"
 
+      # 上传所有 artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

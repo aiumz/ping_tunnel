@@ -117,32 +117,54 @@ impl TransformServer for QuinnServerEndpoint {
     {
         let callback = Arc::new(callback);
         if let Some(endpoint) = self.endpoint.as_ref() {
+            println!("[QUIC Server] Endpoint started, waiting for new QUIC connections...");
             while let Some(connecting) = endpoint.accept().await {
                 let callback = callback.clone();
                 tokio::spawn(async move {
                     let callback = callback.clone();
+                    println!("[QUIC Server] Incoming QUIC connection, waiting for handshake...");
                     match connecting.await {
-                        Ok(conn) => loop {
-                            let conn_box = Arc::new(QuinnConnection {
-                                conn: Arc::new(conn.clone()),
-                            });
-                            match conn.accept_bi().await {
-                                Ok((send, recv)) => {
-                                    let callback = callback.clone();
-                                    tokio::spawn(async move {
-                                        let _ = callback(
-                                            conn_box,
-                                            Box::new(QuinnStream { send, recv }),
-                                        )
-                                        .await;
-                                    });
-                                }
-                                Err(e) => {
-                                    eprintln!("[ERROR] accept_bi failed: {:?}", e);
-                                    break;
+                        Ok(conn) => {
+                            let remote = conn.remote_address();
+                            println!(
+                                "[QUIC Server] Handshake completed, new connection from {}",
+                                remote
+                            );
+                            loop {
+                                let conn_box = Arc::new(QuinnConnection {
+                                    conn: Arc::new(conn.clone()),
+                                });
+                                match conn.accept_bi().await {
+                                    Ok((send, recv)) => {
+                                        let remote = conn.remote_address();
+                                        println!(
+                                            "[QUIC Server] accept_bi ok: new bi-stream from {}",
+                                            remote
+                                        );
+                                        let callback = callback.clone();
+                                        tokio::spawn(async move {
+                                            let _ = callback(
+                                                conn_box,
+                                                Box::new(QuinnStream { send, recv }),
+                                            )
+                                            .await;
+                                        });
+                                    }
+                                    Err(e) => {
+                                        let remote = conn.remote_address();
+                                        eprintln!(
+                                            "[QUIC Server] accept_bi failed for {}: {:?}",
+                                            remote, e
+                                        );
+                                        break;
+                                    }
                                 }
                             }
-                        },
+                            println!(
+                                "[QUIC Server] Stream accept loop ended for connection {}",
+                                remote
+                            );
+                        }
                         Err(e) => {
                             eprintln!("[ERROR] Connection failed: {:?}", e);
                             return;
@@ -150,6 +172,7 @@ impl TransformServer for QuinnServerEndpoint {
                     }
                 });
             }
+            println!("[QUIC Server] Endpoint.accept() loop ended (no more incoming connections).");
             Ok(())
         } else {
             Err(anyhow::anyhow!("Endpoint not found"))

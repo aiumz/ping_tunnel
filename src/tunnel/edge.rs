@@ -42,7 +42,7 @@ async fn start_transport(
     };
     println!("Connecting to server...");
     let mut is_connected = false;
-    const SLEEP_TIME: Duration = Duration::from_secs(10);
+    const SLEEP_TIME: Duration = Duration::from_secs(30);
     let meta = TunnelMeta::from([(AUTH_TOKEN_KEY.to_string(), Value::String(token.clone()))]);
     loop {
         if !is_connected {
