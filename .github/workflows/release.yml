@@ -12,10 +12,10 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            rust_target: x86_64-unknown-linux-musl
+            rust_target: x86_64-unknown-linux-gnu
             artifact_name: linux-x64
           - os: ubuntu-latest
-            rust_target: aarch64-unknown-linux-musl
+            rust_target: aarch64-unknown-linux-gnu
             artifact_name: linux-arm
           - os: macos-latest
             rust_target: x86_64-apple-darwin
@@ -43,54 +43,31 @@ jobs:
       - name: Install napi CLI
         run: npm install -g @napi-rs/cli
 
-      - name: Install cross
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo install cross --version 0.2.5
-
-      # Build Node 插件 (Linux/macOS)
+      - name: Install cross-compilation tools (Linux ARM)
+        if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Build .node (Linux/Mac)
         if: matrix.os != 'windows-latest'
         env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
-          npm install
-          # musl 目标不支持 cdylib，Node.js 模块需要使用 gnu 目标
-          if [[ "${{ matrix.rust_target }}" == *"musl"* ]]; then
-            NODE_TARGET=$(echo "${{ matrix.rust_target }}" | sed 's/-musl/-gnu/')
-            echo "Building Node.js module for $NODE_TARGET (converted from ${{ matrix.rust_target }})"
-          else
-            NODE_TARGET="${{ matrix.rust_target }}"
-          fi
-          # 安装 gnu 目标工具链（如果需要）
-          if [[ "$NODE_TARGET" == *"gnu"* ]] && [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            rustup target add $NODE_TARGET || true
-          fi
-          napi build --release --target $NODE_TARGET --features napi -o dist/${{ matrix.artifact_name }}
-          NODE_FILE=$(find dist/${{ matrix.artifact_name }} -name "ping_tunnel.*.node" -type f | head -1)
-          if [[ -n "$NODE_FILE" ]]; then
-            mv "$NODE_FILE" dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
-          else
-            echo "Error: .node file not found in dist/${{ matrix.artifact_name }}"
-            ls -la dist/${{ matrix.artifact_name }}/
-            exit 1
-          fi
-
-      # Build Rust 可执行文件 (Linux/macOS)
+          napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
+          mv dist/${{ matrix.artifact_name }}/ping_tunnel.node dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
       - name: Build binaries (Linux/Mac)
         if: matrix.os != 'windows-latest'
         env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            cross build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
-          else
-            cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
-          fi
+          cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
           cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
           cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
-
-      # Build Node 插件 (Windows)
       - name: Build .node (Windows)
         if: matrix.os == 'windows-latest'
         env:
@@ -99,18 +76,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "dist\${{ matrix.artifact_name }}"
           $env:PATH = "$env:PATH;$env:ProgramFiles\nodejs"
-          npm install
-          napi build --release --target ${{ matrix.rust_target }} --features napi -o "dist\${{ matrix.artifact_name }}"
-          $nodeFile = Get-ChildItem -Path "dist\${{ matrix.artifact_name }}" -Filter "ping_tunnel.*.node" | Select-Object -First 1
-          if ($nodeFile) {
-            Move-Item -Path $nodeFile.FullName -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.node"
-          } else {
-            Write-Host "Error: .node file not found in dist\${{ matrix.artifact_name }}"
-            Get-ChildItem -Path "dist\${{ matrix.artifact_name }}"
-            exit 1
-          }
-
-      # Build Rust 可执行文件 (Windows)
+          napi build --release --target ${{ matrix.rust_target }} -o "dist\${{ matrix.artifact_name }}"
+          Move-Item -Path "dist\${{ matrix.artifact_name }}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.node"
       - name: Build binaries (Windows)
         if: matrix.os == 'windows-latest'
         env:
@@ -118,10 +85,8 @@ jobs:
         shell: powershell
         run: |
           cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
-          Copy-Item -Path "target\${{ matrix.rust_target}}\release\edge.exe" -Destination "dist\${{ matrix.artifact_name}}\edge-${{ matrix.artifact_name }}.exe"
-          Copy-Item -Path "target\${{ matrix.rust_target}}\release\supernode.exe" -Destination "dist\${{ matrix.artifact_name}}\supernode-${{ matrix.artifact_name }}.exe"
-
-      # 上传所有 artifact
+          Copy-Item -Path "target\${{ matrix.rust_target }}\release\edge.exe" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.exe"
+          Copy-Item -Path "target\${{ matrix.rust_target }}\release\supernode.exe" -Destination "dist\${{ matrix.artifact_name }}\supernode-${{ matrix.artifact_name }}.exe"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -130,7 +95,6 @@ jobs:
             dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
             dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}*
             dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}*
-
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -148,7 +112,6 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y gh
-
       - name: Create GitHub Release and Upload Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
