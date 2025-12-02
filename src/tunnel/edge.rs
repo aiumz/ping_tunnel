@@ -139,9 +139,14 @@ async fn start_transport(
                 }
             }
             Err(e) => {
-                eprintln!("Ping failed: {}", e);
+                eprintln!(
+                    "Ping failed: {}, connection may be broken, will reconnect",
+                    e
+                );
                 is_connected = false;
                 TRANSPORT_SESSION_MAP.remove(DEFAULT_CLIENT_ID);
+                // 连接断开时立即重连，不等待
+                continue;
             }
         }
         tokio::time::sleep(SLEEP_TIME).await;

@@ -68,6 +68,10 @@ impl TransportConnection for QuinnConnection {
         TransportKind::QUIC
     }
     async fn open_stream(&self) -> anyhow::Result<Box<dyn TransportStream>> {
+        // 检查连接是否已关闭
+        if let Some(reason) = self.conn.close_reason() {
+            return Err(anyhow::anyhow!("Connection closed: {:?}", reason));
+        }
         let (send, recv) = self.conn.open_bi().await?;
         Ok(Box::new(QuinnStream { send, recv }))
     }
@@ -126,59 +130,67 @@ impl TransformServer for QuinnServerEndpoint {
         let callback = Arc::new(callback);
         if let Some(endpoint) = self.endpoint.as_ref() {
             println!("[QUIC Server] Endpoint started, waiting for new QUIC connections...");
-            while let Some(connecting) = endpoint.accept().await {
-                let callback = callback.clone();
-                tokio::spawn(async move {
-                    let callback = callback.clone();
-                    println!("[QUIC Server] Incoming QUIC connection, waiting for handshake...");
-                    match connecting.await {
-                        Ok(conn) => {
-                            let remote = conn.remote_address();
+            loop {
+                // 使用 loop + match 而不是 while let，以便更好地处理 None 情况
+                match endpoint.accept().await {
+                    Some(connecting) => {
+                        let callback = callback.clone();
+                        tokio::spawn(async move {
+                            let callback = callback.clone();
                             println!(
-                                "[QUIC Server] Handshake completed, new connection from {}",
-                                remote
+                                "[QUIC Server] Incoming QUIC connection, waiting for handshake..."
                             );
-
-                            let conn_box = Arc::new(QuinnConnection { conn: conn.clone() });
-                            loop {
-                                let conn_for_accept = conn.clone();
-                                match conn_for_accept.accept_bi().await {
-                                    Ok((send, recv)) => {
-                                        let remote = conn_for_accept.remote_address();
-                                        println!(
-                                            "[QUIC Server] accept_bi ok: new bi-stream from {}",
-                                            remote
-                                        );
-                                        let callback = callback.clone();
-                                        let conn_for_callback = conn_box.clone();
-                                        tokio::spawn(async move {
-                                            let _ = callback(
-                                                conn_for_callback,
-                                                Box::new(QuinnStream { send, recv }),
-                                            )
-                                            .await;
-                                        });
+                            match connecting.await {
+                                Ok(conn) => {
+                                    let conn_box = Arc::new(QuinnConnection { conn: conn.clone() });
+                                    loop {
+                                        let conn_for_accept = conn.clone();
+                                        match conn_for_accept.accept_bi().await {
+                                            Ok((send, recv)) => {
+                                                let remote = conn_for_accept.remote_address();
+                                                println!(
+                                                    "[QUIC Server] accept_bi ok: new bi-stream from {}",
+                                                    remote
+                                                );
+                                                let callback = callback.clone();
+                                                let conn_for_callback = conn_box.clone();
+                                                tokio::spawn(async move {
+                                                    let _ = callback(
+                                                        conn_for_callback,
+                                                        Box::new(QuinnStream { send, recv }),
+                                                    )
+                                                    .await;
+                                                });
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "[QUIC Server] accept_bi failed: {:?}",
+                                                    e
+                                                );
+                                                break;
+                                            }
+                                        }
                                     }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "[QUIC Server] accept_bi failed for {}: {:?}",
-                                            remote, e
-                                        );
-                                        break;
-                                    }
+                                    conn.close(VarInt::from(0u32), b"");
+                                    println!(
+                                        "[QUIC Server] Stream accept loop ended for connection"
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("[ERROR] Connection handshake failed: {:?}", e);
+                                    // 不 return，让外层循环继续等待新连接
                                 }
                             }
-                            println!(
-                                "[QUIC Server] Stream accept loop ended for connection {}",
-                                remote
-                            );
-                        }
-                        Err(e) => {
-                            eprintln!("[ERROR] Connection failed: {:?}", e);
-                            return;
-                        }
+                        });
                     }
-                });
+                    None => {
+                        eprintln!(
+                            "[QUIC Server] endpoint.accept() returned None, endpoint may be closed"
+                        );
+                        // 如果 endpoint 被关闭，退出循环
+                        break;
+                    }
+                }
             }
             println!("[QUIC Server] Endpoint.accept() loop ended (no more incoming connections).");
             Ok(())
@@ -216,8 +228,10 @@ impl TransformClient for QuinnClientEndpoint {
 
         let mut transport_config = quinn::TransportConfig::default();
         transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
-        transport_config
-            .max_idle_timeout(Some(std::time::Duration::from_secs(30).try_into().unwrap()));
+        // 与服务端保持一致：120秒超时
+        transport_config.max_idle_timeout(Some(
+            std::time::Duration::from_secs(120).try_into().unwrap(),
+        ));
 
         let mut client_config = QuinnClientConfig::new(Arc::new(quic_client_config));
         client_config.transport_config(Arc::new(transport_config));
