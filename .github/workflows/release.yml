@@ -58,7 +58,8 @@ jobs:
           mkdir -p dist/${{ matrix.artifact_name }}
           npm install
           napi build --release --target ${{ matrix.rust_target }} --features napi -o dist/${{ matrix.artifact_name }}
-          NODE_FILE=$(find dist/${{ matrix.artifact_name }} -name "ping_tunnel.*.node" -type f | head -1)
+          # 查找 ping_tunnel.node 或 ping_tunnel.*.node 格式的文件
+          NODE_FILE=$(find dist/${{ matrix.artifact_name }} -name "ping_tunnel*.node" -type f | head -1)
           if [[ -n "$NODE_FILE" ]]; then
             mv "$NODE_FILE" dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
           else
@@ -86,7 +87,8 @@ jobs:
           $env:PATH = "$env:PATH;$env:ProgramFiles\nodejs"
           npm install
           napi build --release --target ${{ matrix.rust_target }} --features napi -o "dist\${{ matrix.artifact_name }}"
-          $nodeFile = Get-ChildItem -Path "dist\${{ matrix.artifact_name }}" -Filter "ping_tunnel.*.node" | Select-Object -First 1
+          # 查找 ping_tunnel.node 或 ping_tunnel.*.node 格式的文件
+          $nodeFile = Get-ChildItem -Path "dist\${{ matrix.artifact_name }}" -Filter "ping_tunnel*.node" | Select-Object -First 1
           if ($nodeFile) {
             Move-Item -Path $nodeFile.FullName -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.node"
           } else {
