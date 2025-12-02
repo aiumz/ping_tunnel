@@ -55,7 +55,18 @@ jobs:
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
           npm install
-          napi build --release --target ${{ matrix.rust_target }} --features napi -o dist/${{ matrix.artifact_name }}
+          # musl 目标不支持 cdylib，Node.js 模块需要使用 gnu 目标
+          if [[ "${{ matrix.rust_target }}" == *"musl"* ]]; then
+            NODE_TARGET=$(echo "${{ matrix.rust_target }}" | sed 's/-musl/-gnu/')
+            echo "Building Node.js module for $NODE_TARGET (converted from ${{ matrix.rust_target }})"
+          else
+            NODE_TARGET="${{ matrix.rust_target }}"
+          fi
+          # 安装 gnu 目标工具链（如果需要）
+          if [[ "$NODE_TARGET" == *"gnu"* ]] && [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            rustup target add $NODE_TARGET || true
+          fi
+          napi build --release --target $NODE_TARGET --features napi -o dist/${{ matrix.artifact_name }}
           NODE_FILE=$(find dist/${{ matrix.artifact_name }} -name "ping_tunnel.*.node" -type f | head -1)
           if [[ -n "$NODE_FILE" ]]; then
             mv "$NODE_FILE" dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
