@@ -3,16 +3,19 @@ use std::{
     collections::HashMap,
     sync::{Arc, LazyLock},
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::{io::AsyncWriteExt, sync::RwLock};
+use tokio::time::{Duration, timeout};
+use tokio::{
+    io::{self, AsyncRead, AsyncWrite},
+    sync::RwLock,
+};
 
-use crate::{
-    tunnel::session::{TRANSPORT_SESSION_MAP, get_default_session, get_session},
-    tunnel::{
-        common::{AUTH_TOKEN_KEY, FORWARD_TO_KEY, get_client_id_from_token},
-        packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta},
-        sniff,
-    },
+use crate::tunnel::{
+    common::{AUTH_TOKEN_KEY, FORWARD_TO_KEY, copy_buffer, get_client_id_from_token},
+    packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta},
+    session::{TRANSPORT_SESSION_MAP, get_default_session, get_session},
+    sniff,
 };
 
 pub static TCP_INBOUND_ADDR: LazyLock<Arc<RwLock<String>>> =
@@ -60,7 +63,7 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
 
                 println!("Forwarding HTTP request to: {}", request_info.host);
 
-                tokio::spawn(async move {
+                let tcp_to_transport = tokio::spawn(async move {
                     let meta = TunnelMeta::from([(
                         FORWARD_TO_KEY.to_string(),
                         Value::String(request_info.host.clone()),
@@ -71,27 +74,21 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
                         eprintln!("Failed to send Forward command: {:?}", e);
                         return;
                     }
-                    if let Err(e) = upstream_writer.flush().await {
-                        eprintln!("Failed to flush Forward command: {:?}", e);
-                        return;
-                    }
-
-                    println!("Copying HTTP request data to QUIC stream...");
-                    if let Err(e) = tokio::io::copy(&mut tcp_recv, &mut upstream_writer).await {
+                    if let Err(e) = copy_buffer(&mut tcp_recv, &mut upstream_writer).await {
                         eprintln!("copy stream -> upstream error: {:?}", e);
                     }
-                    if let Err(e) = upstream_writer.shutdown().await {
-                        eprintln!("shutdown upstream_writer error: {:?}", e);
-                    }
+                    upstream_writer.shutdown().await.ok();
                 });
-                tokio::spawn(async move {
-                    if let Err(e) = tokio::io::copy(&mut upstream_reader, &mut tcp_send).await {
+                let transport_to_tcp = tokio::spawn(async move {
+                    if let Err(e) = copy_buffer(&mut upstream_reader, &mut tcp_send).await {
                         eprintln!("copy upstream -> stream error: {:?}", e);
                     }
-                    if let Err(e) = tcp_send.shutdown().await {
-                        eprintln!("shutdown stream_writer error: {:?}", e);
-                    }
+                    tcp_send.shutdown().await.ok();
                 });
+                let res = tokio::try_join!(tcp_to_transport, transport_to_tcp);
+                if let Err(e) = res {
+                    eprintln!("copy stream -> upstream error: {:?}", e);
+                };
             } else {
                 let _ = json_response(
                     &mut tcp_send,
