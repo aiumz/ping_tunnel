@@ -11,23 +11,18 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux MUSL 版本
           - os: ubuntu-latest
             rust_target: x86_64-unknown-linux-musl
             artifact_name: linux-x64
           - os: ubuntu-latest
             rust_target: aarch64-unknown-linux-musl
             artifact_name: linux-arm
-
-          # macOS 原生
           - os: macos-latest
             rust_target: x86_64-apple-darwin
             artifact_name: darwin-x64
           - os: macos-latest
             rust_target: aarch64-apple-darwin
             artifact_name: darwin-arm
-
-          # Windows 原生
           - os: windows-latest
             rust_target: x86_64-pc-windows-msvc
             artifact_name: win-x64
@@ -48,29 +43,33 @@ jobs:
       - name: Install napi CLI
         run: npm install -g @napi-rs/cli
 
-      # 安装 cross（用于 Linux 交叉编译）
-      - name: Install cross (Linux only)
+      - name: Install cross (for Linux musl)
         if: matrix.os == 'ubuntu-latest'
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        run: |
+          cargo install cross
 
-      # Build Node 插件
+      # Build Node 插件 (Linux/macOS)
       - name: Build .node (Linux/Mac)
         if: matrix.os != 'windows-latest'
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            cross build --release --target ${{ matrix.rust_target }} -p ping_tunnel
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            cross build --release --target ${{ matrix.rust_target }}
           else
-            cargo build --release --target ${{ matrix.rust_target }} -p ping_tunnel
+            cargo build --release --target ${{ matrix.rust_target }}
           fi
           napi build --release --target ${{ matrix.rust_target }} -o dist/${{ matrix.artifact_name }}
           mv dist/${{ matrix.artifact_name }}/ping_tunnel.node dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
 
-      # Build Rust 可执行文件
+      # Build Rust 可执行文件 (Linux/macOS)
       - name: Build binaries (Linux/Mac)
         if: matrix.os != 'windows-latest'
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
             cross build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
           else
             cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
@@ -78,18 +77,23 @@ jobs:
           cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
           cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
 
-      # Windows .node
+      # Build Node 插件 (Windows)
       - name: Build .node (Windows)
         if: matrix.os == 'windows-latest'
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path "dist\${{ matrix.artifact_name }}"
+          $env:PATH = "$env:PATH;$env:ProgramFiles\nodejs"
           napi build --release --target ${{ matrix.rust_target }} -o "dist\${{ matrix.artifact_name }}"
           Move-Item -Path "dist\${{ matrix.artifact_name}}\ping_tunnel.node" -Destination "dist\${{ matrix.artifact_name}}\edge-${{ matrix.artifact_name }}.node"
 
-      # Windows binaries
+      # Build Rust 可执行文件 (Windows)
       - name: Build binaries (Windows)
         if: matrix.os == 'windows-latest'
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         shell: powershell
         run: |
           cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
