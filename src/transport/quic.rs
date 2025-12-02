@@ -102,7 +102,7 @@ impl TransformServer for QuinnServerEndpoint {
 
         let mut transport_config = quinn::TransportConfig::default();
         transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
-        transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()));
+        transport_config.max_idle_timeout(Some(Duration::from_secs(120).try_into().unwrap()));
 
         let mut server_config =
             quinn::ServerConfig::with_crypto(std::sync::Arc::new(quic_server_config));

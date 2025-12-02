@@ -1,6 +1,6 @@
 const { EdgeClient } = require('./index.js');
 
-const client = new EdgeClient('221.11.37.114:41493', '221', '127.0.0.1:8000');
+const client = new EdgeClient('192.168.2.6:4433', '192', '127.0.0.1:11100');
 client.connect();
 
 

@@ -27,7 +27,7 @@ pub async fn start_server(
     };
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(120)).await;
+            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
             clear_expired_sessions().await;
         }
     });
