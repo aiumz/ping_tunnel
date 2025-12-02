@@ -27,7 +27,6 @@
     "build:all": "echo 'Please build for all platforms manually or use CI/CD'",
     "artifacts": "napi artifacts",
     "version": "napi version",
-    "postinstall": "node scripts/postinstall.js",
     "edge": "cargo run --bin edge  -- 192.168.2.6:4433 192 127.0.0.1:11100",
     "supernode": "cargo run --bin supernode -- 0.0.0.0:4433 0.0.0.0:4432 ./cert/cert.pem ./cert/key.pem"
   },
