@@ -58,12 +58,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      # 安装 musl 工具链（对于 musl 目标）
-      - name: Install cross-compilation tools (Linux musl)
+      # 安装 musl 编译工具链（对于 musl 目标）
+      - name: Install musl-cross-make (Linux musl)
         if: matrix.rust_target == 'x86_64-unknown-linux-musl' || matrix.rust_target == 'aarch64-unknown-linux-musl'
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu pkg-config libssl-dev
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-musl pkg-config libssl-dev
 
       # Build .node for Node.js plugin (GNU target)
       - name: Build .node (Node.js plugin - Linux/Mac)
