@@ -42,7 +42,7 @@ async fn start_transport(
     };
     println!("Connecting to server...");
     let mut is_connected = false;
-    const SLEEP_TIME: Duration = Duration::from_secs(1);
+    const SLEEP_TIME: Duration = Duration::from_secs(10);
     let meta = TunnelMeta::from([(AUTH_TOKEN_KEY.to_string(), Value::String(token.clone()))]);
     loop {
         if !is_connected {
@@ -160,7 +160,7 @@ async fn send_command(
 ) -> Result<TunnelCommandPacket, anyhow::Error> {
     let session = get_default_session();
     if let Some(session) = session {
-        tokio::time::timeout(Duration::from_secs(40), async {
+        tokio::time::timeout(Duration::from_secs(10), async {
             let stream = session
                 .conn
                 .open_stream()

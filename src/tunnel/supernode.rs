@@ -41,11 +41,15 @@ pub async fn start_server(
         result = start_transport(config) => {
             if let Err(e) = result {
                 eprintln!("[Supernode] Transport error: {:?}", e);
+            }else{
+                println!("[Supernode] Transport closed");
             }
         }
         result = bind_tcp_inbound(inbound_config) => {
             if let Err(e) = result {
                 eprintln!("[Supernode] Inbound error: {:?}", e);
+            }else{
+                println!("[Supernode] Inbound closed");
             }
         }
     }
