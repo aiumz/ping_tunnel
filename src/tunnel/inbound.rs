@@ -109,7 +109,7 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
             }
             Err(e) => {
                 eprintln!("accept error: {:?}", e);
-                break;
+                continue;
             }
         }
     }
