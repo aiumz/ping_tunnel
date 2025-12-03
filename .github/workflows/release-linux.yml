@@ -55,10 +55,30 @@ jobs:
         if: matrix.rust_target == 'aarch64-unknown-linux-musl'
         run: |
           TOOLCHAIN_DIR=/opt/aarch64-linux-musl-cross
+          ARCHIVE=/tmp/aarch64-linux-musl-cross.tgz
+          set -euo pipefail
           sudo rm -rf "${TOOLCHAIN_DIR}"
           sudo mkdir -p /opt
-          curl -sSL https://musl.cc/aarch64-linux-musl-cross.tgz -o /tmp/aarch64-linux-musl-cross.tgz
-          sudo tar -xzf /tmp/aarch64-linux-musl-cross.tgz -C /opt
+          URLS=(
+            "https://musl.cc/aarch64-linux-musl-cross.tgz"
+            "https://github.com/messense/musl-cross/releases/latest/download/aarch64-linux-musl-cross.tgz"
+          )
+          success=0
+          for url in "${URLS[@]}"; do
+            echo "Attempting to download toolchain from ${url}"
+            if curl -fSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 600 "${url}" -o "${ARCHIVE}"; then
+              success=1
+              break
+            else
+              echo "Download failed from ${url}, trying next mirror..."
+            fi
+          done
+          if [[ "${success}" -ne 1 ]]; then
+            echo "Unable to download aarch64 musl toolchain from all mirrors."
+            exit 1
+          fi
+
+          sudo tar -xzf "${ARCHIVE}" -C /opt
           echo "/opt/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
           {
             echo "CC_aarch64_unknown_linux_musl=/opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc"
