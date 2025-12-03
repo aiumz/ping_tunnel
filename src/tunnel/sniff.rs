@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use tokio::net::tcp::OwnedReadHalf;
 
+use crate::tunnel::common::{AUTH_TOKEN_KEY, get_client_id_from_token};
+
 #[derive(Debug)]
 pub struct SniffResult {
     pub tunnel_id: String,
@@ -43,26 +45,27 @@ fn sniff_http(buf: &[u8]) -> Option<SniffResult> {
                 )
             })
             .collect();
-
         let host_header = headers_map
             .get("Host")
-            .unwrap_or(&"my-secret-token.localhost".to_string())
+            .unwrap_or(&"localhost".to_string())
             .to_string();
+
+        let tunnel_id = match headers_map.get(AUTH_TOKEN_KEY) {
+            Some(token) => get_client_id_from_token(token),
+            None => host_header
+                .split('.')
+                .next()
+                .unwrap_or("localhost")
+                .to_string(),
+        };
 
         let host = if host_header.contains(':') {
             host_header.clone()
         } else {
             format!("{}:80", host_header)
         };
-
-        let host_without_port = host_header.split(':').next().unwrap_or(&host_header);
-
         return Some(SniffResult {
-            tunnel_id: host_without_port
-                .split('.')
-                .next()
-                .unwrap_or("my-secret-token")
-                .to_string(),
+            tunnel_id: tunnel_id,
             host,
             is_https: false,
         });

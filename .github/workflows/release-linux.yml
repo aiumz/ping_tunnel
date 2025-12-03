@@ -1,0 +1,188 @@
+name: Build and Release (Linux)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rust_target: x86_64-unknown-linux-gnu
+            artifact_name: linux-x64-gnu
+          - rust_target: aarch64-unknown-linux-gnu
+            artifact_name: linux-arm-gnu
+          - rust_target: x86_64-unknown-linux-musl
+            artifact_name: linux-x64-musl
+          - rust_target: aarch64-unknown-linux-musl
+            artifact_name: linux-arm-musl
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install napi CLI
+        run: npm install -g @napi-rs/cli
+
+      - name: Install cross-compilation tools (Linux ARM)
+        if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+          echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Install musl dependencies (Linux musl)
+        if: contains(matrix.rust_target, 'musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools pkg-config libssl-dev
+
+      # - name: Setup aarch64 musl toolchain
+      #   if: matrix.rust_target == 'aarch64-unknown-linux-musl'
+      #   run: |
+      #     TOOLCHAIN_DIR=/opt/aarch64-linux-musl-cross
+      #     set -euo pipefail
+      #     sudo rm -rf "${TOOLCHAIN_DIR}"
+      #     sudo mkdir -p /opt
+      #     MIRRORS=(
+      #       "https://musl.cc/aarch64-linux-musl-cross.tgz|tgz"
+      #       "https://github.com/messense/musl-cross/releases/latest/download/aarch64-linux-musl-cross.tar.xz|tar.xz"
+      #     )
+      #     success=0
+      #     for entry in "${MIRRORS[@]}"; do
+      #       url="${entry%%|*}"
+      #       ext="${entry##*|}"
+      #       ARCHIVE="/tmp/aarch64-linux-musl-cross.${ext}"
+      #       echo "Attempting to download toolchain from ${url}"
+      #       if curl -fSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 600 "${url}" -o "${ARCHIVE}"; then
+      #         case "${ext}" in
+      #           tgz) sudo tar -xzf "${ARCHIVE}" -C /opt ;;
+      #           tar.xz) sudo tar -xJf "${ARCHIVE}" -C /opt ;;
+      #           *) echo "Unknown archive extension: ${ext}"; exit 1 ;;
+      #         esac
+      #         success=1
+      #         break
+      #       else
+      #         echo "Download failed from ${url}, trying next mirror..."
+      #       fi
+      #     done
+      #     if [[ "${success}" -ne 1 ]]; then
+      #       echo "Unable to download aarch64 musl toolchain from all mirrors."
+      #       exit 1
+      #     fi
+      #
+      #     echo "/opt/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
+      #     {
+      #       echo "CC_aarch64_unknown_linux_musl=/opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc"
+      #       echo "AR_aarch64_unknown_linux_musl=/opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-ar"
+      #       echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=/opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc"
+      #     } >> "$GITHUB_ENV"
+
+      - name: Build .node (Node.js plugin - Linux)
+        if: contains(matrix.rust_target, '-gnu')
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        run: |
+          mkdir -p dist/${{ matrix.artifact_name }}
+          npm install
+          napi build --release --target ${{ matrix.rust_target }} --features napi -o dist/${{ matrix.artifact_name }}
+          NODE_FILE=$(find dist/${{ matrix.artifact_name }} -name "ping_tunnel*.node" -type f | head -1)
+          if [[ -n "$NODE_FILE" ]]; then
+            mv "$NODE_FILE" dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
+          else
+            echo "Error: .node file not found in dist/${{ matrix.artifact_name }}"
+            ls -la dist/${{ matrix.artifact_name }}/
+            exit 1
+          fi
+
+      - name: Build binaries (Rust - musl)
+        if: contains(matrix.rust_target, 'musl')
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        run: |
+          mkdir -p dist/${{ matrix.artifact_name }}
+          cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
+          cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
+          cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
+
+      - name: Build binaries (Rust - gnu target)
+        if: contains(matrix.rust_target, '-gnu')
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        run: |
+          mkdir -p dist/${{ matrix.artifact_name }}
+          cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
+          cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
+          cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}*
+            dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install -y gh
+
+      - name: Publish Linux artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          TITLE="${TAG}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes "Release $TAG"
+          else
+            echo "Release $TAG already exists, uploading assets..."
+          fi
+
+          gh release upload "$TAG" --clobber \
+            ./dist/linux-x64-gnu/edge-linux-x64-gnu.node \
+            ./dist/linux-x64-gnu/edge-linux-x64-gnu \
+            ./dist/linux-x64-gnu/supernode-linux-x64-gnu
+
+          gh release upload "$TAG" --clobber \
+            ./dist/linux-arm-gnu/edge-linux-arm-gnu.node \
+            ./dist/linux-arm-gnu/edge-linux-arm-gnu \
+            ./dist/linux-arm-gnu/supernode-linux-arm-gnu
+
+          gh release upload "$TAG" --clobber \
+            ./dist/linux-x64-musl/edge-linux-x64-musl \
+            ./dist/linux-x64-musl/supernode-linux-x64-musl
+
+          gh release upload "$TAG" --clobber \
+            ./dist/linux-arm-musl/edge-linux-arm-musl \
+            ./dist/linux-arm-musl/supernode-linux-arm-musl

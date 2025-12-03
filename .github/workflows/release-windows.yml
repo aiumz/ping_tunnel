@@ -1,0 +1,103 @@
+name: Build and Release (Windows)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - rust_target: x86_64-pc-windows-msvc
+            artifact_name: win-x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install napi CLI
+        run: npm install -g @napi-rs/cli
+
+      - name: Build .node (Windows)
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "dist\${{ matrix.artifact_name }}"
+          $env:PATH = "$env:PATH;$env:ProgramFiles\nodejs"
+          npm install
+          napi build --release --target ${{ matrix.rust_target }} --features napi -o "dist\${{ matrix.artifact_name }}"
+          $nodeFile = Get-ChildItem -Path "dist\${{ matrix.artifact_name }}" -Filter "ping_tunnel*.node" | Select-Object -First 1
+          if ($nodeFile) {
+            Move-Item -Path $nodeFile.FullName -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.node"
+          } else {
+            Write-Host "Error: .node file not found in dist\${{ matrix.artifact_name }}"
+            Get-ChildItem -Path "dist\${{ matrix.artifact_name }}"
+            exit 1
+          }
+
+      - name: Build binaries (Windows)
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        shell: powershell
+        run: |
+          cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
+          Copy-Item -Path "target\${{ matrix.rust_target }}\release\edge.exe" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.exe"
+          Copy-Item -Path "target\${{ matrix.rust_target }}\release\supernode.exe" -Destination "dist\${{ matrix.artifact_name }}\supernode-${{ matrix.artifact_name }}.exe"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}*
+            dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install -y gh
+
+      - name: Publish Windows artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          TITLE="${TAG}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes "Release $TAG"
+          else
+            echo "Release $TAG already exists, uploading assets..."
+          fi
+
+          gh release upload "$TAG" --clobber \
+            ./dist/win-x64/edge-win-x64.node \
+            ./dist/win-x64/edge-win-x64.exe \
+            ./dist/win-x64/supernode-win-x64.exe

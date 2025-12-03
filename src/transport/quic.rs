@@ -3,7 +3,7 @@ use crate::transport::base::{
     TransportKind, TransportStream,
 };
 use crate::transport::cert::NoCertificateVerification;
-use quinn::{ClientConfig as QuinnClientConfig, Endpoint, RecvStream, SendStream};
+use quinn::{ClientConfig as QuinnClientConfig, Endpoint, RecvStream, SendStream, VarInt};
 use rustls::ClientConfig as RustlsClientConfig;
 use std::{
     pin::Pin,
@@ -18,40 +18,48 @@ pub struct QuinnStream {
     pub send: SendStream,
     pub recv: RecvStream,
 }
+
 impl AsyncWrite for QuinnStream {
     fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context,
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> Poll<Result<usize, io::Error>> {
-        let send = unsafe { self.map_unchecked_mut(|s| &mut s.send) };
-        send.poll_write(cx, buf)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+    ) -> Poll<io::Result<usize>> {
+        let this = &mut *self;
+        Pin::new(&mut this.send)
+            .poll_write(cx, buf)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
-        let send = unsafe { self.map_unchecked_mut(|s| &mut s.send) };
-        send.poll_flush(cx)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = &mut *self;
+        Pin::new(&mut this.send)
+            .poll_flush(cx)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
-        let send = unsafe { self.map_unchecked_mut(|s| &mut s.send) };
-        send.poll_shutdown(cx)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = &mut *self;
+        Pin::new(&mut this.send)
+            .poll_shutdown(cx)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 }
+
 impl AsyncRead for QuinnStream {
     fn poll_read(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        let recv = unsafe { self.map_unchecked_mut(|s| &mut s.recv) };
-        recv.poll_read(cx, buf)
+        let this = &mut *self;
+        Pin::new(&mut this.recv).poll_read(cx, buf)
     }
 }
+
 impl TransportStream for QuinnStream {}
 pub struct QuinnConnection {
-    pub conn: Arc<quinn::Connection>,
+    pub conn: quinn::Connection,
 }
 
 #[async_trait::async_trait]
@@ -60,6 +68,9 @@ impl TransportConnection for QuinnConnection {
         TransportKind::QUIC
     }
     async fn open_stream(&self) -> anyhow::Result<Box<dyn TransportStream>> {
+        if let Some(reason) = self.conn.close_reason() {
+            return Err(anyhow::anyhow!("Connection closed: {:?}", reason));
+        }
         let (send, recv) = self.conn.open_bi().await?;
         Ok(Box::new(QuinnStream { send, recv }))
     }
@@ -93,8 +104,8 @@ impl TransformServer for QuinnServerEndpoint {
         let quic_server_config = quinn::crypto::rustls::QuicServerConfig::try_from(rustls_config)?;
 
         let mut transport_config = quinn::TransportConfig::default();
-        transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
-        transport_config.max_idle_timeout(None);
+        transport_config.keep_alive_interval(Some(Duration::from_secs(20)));
+        // transport_config.max_idle_timeout(Some(Duration::from_secs(120).try_into().unwrap()));
 
         let mut server_config =
             quinn::ServerConfig::with_crypto(std::sync::Arc::new(quic_server_config));
@@ -117,39 +128,68 @@ impl TransformServer for QuinnServerEndpoint {
     {
         let callback = Arc::new(callback);
         if let Some(endpoint) = self.endpoint.as_ref() {
-            while let Some(connecting) = endpoint.accept().await {
-                let callback = callback.clone();
-                tokio::spawn(async move {
-                    let callback = callback.clone();
-                    match connecting.await {
-                        Ok(conn) => loop {
-                            let conn_box = Arc::new(QuinnConnection {
-                                conn: Arc::new(conn.clone()),
-                            });
-                            match conn.accept_bi().await {
-                                Ok((send, recv)) => {
-                                    let callback = callback.clone();
-                                    tokio::spawn(async move {
-                                        let _ = callback(
-                                            conn_box,
-                                            Box::new(QuinnStream { send, recv }),
-                                        )
-                                        .await;
-                                    });
+            println!("[QUIC Server] Endpoint started, waiting for new QUIC connections...");
+            loop {
+                match endpoint.accept().await {
+                    Some(connecting) => {
+                        let callback = callback.clone();
+                        tokio::spawn(async move {
+                            let callback = callback.clone();
+                            println!(
+                                "[QUIC Server] Incoming QUIC connection, waiting for handshake..."
+                            );
+                            match connecting.await {
+                                Ok(conn) => {
+                                    let conn_box = Arc::new(QuinnConnection { conn: conn.clone() });
+                                    loop {
+                                        let conn_for_accept = conn.clone();
+                                        match conn_for_accept.accept_bi().await {
+                                            Ok((send, recv)) => {
+                                                let callback = callback.clone();
+                                                let conn_for_callback = conn_box.clone();
+                                                tokio::spawn(async move {
+                                                    if let Err(err) = callback(
+                                                        conn_for_callback,
+                                                        Box::new(QuinnStream { send, recv }),
+                                                    )
+                                                    .await
+                                                    {
+                                                        eprintln!(
+                                                            "[QUIC Server] Stream callback error: {:?}",
+                                                            err
+                                                        );
+                                                    }
+                                                });
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "[QUIC Server] accept_bi failed: {:?}",
+                                                    e
+                                                );
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    conn.close(VarInt::from(0u32), b"");
+                                    println!(
+                                        "[QUIC Server] Stream accept loop ended for connection"
+                                    );
                                 }
                                 Err(e) => {
-                                    eprintln!("[ERROR] accept_bi failed: {:?}", e);
-                                    break;
+                                    eprintln!("[ERROR] Connection handshake failed: {:?}", e);
                                 }
                             }
-                        },
-                        Err(e) => {
-                            eprintln!("[ERROR] Connection failed: {:?}", e);
-                            return;
-                        }
+                        });
                     }
-                });
+                    None => {
+                        eprintln!(
+                            "[QUIC Server] endpoint.accept() returned None, endpoint may be closed"
+                        );
+                        break;
+                    }
+                }
             }
+            println!("[QUIC Server] Endpoint.accept() loop ended (no more incoming connections).");
             Ok(())
         } else {
             Err(anyhow::anyhow!("Endpoint not found"))
@@ -158,7 +198,7 @@ impl TransformServer for QuinnServerEndpoint {
 }
 
 pub struct QuinnClientEndpoint {
-    pub conn: Arc<quinn::Connection>,
+    pub conn: quinn::Connection,
 }
 
 #[async_trait::async_trait]
@@ -185,8 +225,10 @@ impl TransformClient for QuinnClientEndpoint {
 
         let mut transport_config = quinn::TransportConfig::default();
         transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
-        transport_config
-            .max_idle_timeout(Some(std::time::Duration::from_secs(30).try_into().unwrap()));
+        // 与服务端保持一致：120秒超时
+        // transport_config.max_idle_timeout(Some(
+        //     std::time::Duration::from_secs(120).try_into().unwrap(),
+        // ));
 
         let mut client_config = QuinnClientConfig::new(Arc::new(quic_client_config));
         client_config.transport_config(Arc::new(transport_config));
@@ -238,9 +280,7 @@ impl TransformClient for QuinnClientEndpoint {
                     continue;
                 }
             };
-            return Ok(Arc::new(QuinnClientEndpoint {
-                conn: Arc::new(conn),
-            }));
+            return Ok(Arc::new(QuinnClientEndpoint { conn }));
         }
     }
 
