@@ -113,7 +113,6 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
             }
         }
     }
-    Ok(Arc::new(TcpInbound { listener }))
 }
 
 async fn json_response(
