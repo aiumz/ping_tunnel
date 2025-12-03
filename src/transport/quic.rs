@@ -104,8 +104,8 @@ impl TransformServer for QuinnServerEndpoint {
         let quic_server_config = quinn::crypto::rustls::QuicServerConfig::try_from(rustls_config)?;
 
         let mut transport_config = quinn::TransportConfig::default();
-        transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
-        transport_config.max_idle_timeout(Some(Duration::from_secs(120).try_into().unwrap()));
+        transport_config.keep_alive_interval(Some(Duration::from_secs(20)));
+        // transport_config.max_idle_timeout(Some(Duration::from_secs(120).try_into().unwrap()));
 
         let mut server_config =
             quinn::ServerConfig::with_crypto(std::sync::Arc::new(quic_server_config));
@@ -148,11 +148,17 @@ impl TransformServer for QuinnServerEndpoint {
                                                 let callback = callback.clone();
                                                 let conn_for_callback = conn_box.clone();
                                                 tokio::spawn(async move {
-                                                    let _ = callback(
+                                                    if let Err(err) = callback(
                                                         conn_for_callback,
                                                         Box::new(QuinnStream { send, recv }),
                                                     )
-                                                    .await;
+                                                    .await
+                                                    {
+                                                        eprintln!(
+                                                            "[QUIC Server] Stream callback error: {:?}",
+                                                            err
+                                                        );
+                                                    }
                                                 });
                                             }
                                             Err(e) => {
@@ -220,9 +226,9 @@ impl TransformClient for QuinnClientEndpoint {
         let mut transport_config = quinn::TransportConfig::default();
         transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
         // 与服务端保持一致：120秒超时
-        transport_config.max_idle_timeout(Some(
-            std::time::Duration::from_secs(120).try_into().unwrap(),
-        ));
+        // transport_config.max_idle_timeout(Some(
+        //     std::time::Duration::from_secs(120).try_into().unwrap(),
+        // ));
 
         let mut client_config = QuinnClientConfig::new(Arc::new(quic_client_config));
         client_config.transport_config(Arc::new(transport_config));

@@ -131,10 +131,6 @@ async fn json_response(
         .await
         .unwrap_or_else(|e| eprintln!("[ERROR] Failed to write to TCP client: {}", e));
     tcp_writer
-        .flush()
-        .await
-        .unwrap_or_else(|e| eprintln!("[ERROR] Failed to flush TCP client: {}", e));
-    tcp_writer
         .shutdown()
         .await
         .unwrap_or_else(|e| eprintln!("[ERROR] Failed to shutdown TCP client: {}", e));

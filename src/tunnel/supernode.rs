@@ -17,6 +17,10 @@ pub async fn start_server(
     cert_path: String,
     key_path: String,
 ) -> anyhow::Result<()> {
+    println!(
+        "[Supernode] Initializing with QUIC={} TCP={} cert={} key={}",
+        quic_bind_addr, tcp_bind_addr, cert_path, key_path
+    );
     let config = ServerConfig {
         addr: quic_bind_addr.clone(),
         ssl_cert_path: cert_path.clone(),
@@ -28,6 +32,7 @@ pub async fn start_server(
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+            println!("[Supernode] Clearing expired transport sessions...");
             clear_expired_sessions().await;
         }
     });
@@ -35,12 +40,12 @@ pub async fn start_server(
     tokio::select! {
         result = start_transport(config) => {
             if let Err(e) = result {
-                eprintln!("Transport error: {:?}", e);
+                eprintln!("[Supernode] Transport error: {:?}", e);
             }
         }
         result = bind_tcp_inbound(inbound_config) => {
             if let Err(e) = result {
-                eprintln!("Inbound error: {:?}", e);
+                eprintln!("[Supernode] Inbound error: {:?}", e);
             }
         }
     }
@@ -49,15 +54,28 @@ pub async fn start_server(
 
 async fn start_transport(config: ServerConfig) -> anyhow::Result<()> {
     let server = QuinnServerEndpoint::bind(config).await?;
-    println!("Server bound, waiting for connections...");
+    println!("[Supernode] QUIC server bound, waiting for streams...");
     server
         .accept(|conn_box, stream| async move {
+            println!("[Supernode] Bi-directional QUIC stream accepted, waiting for command...");
             let (mut stream_reader, stream_writer) = tokio::io::split(stream);
-            let packet = TunnelCommandPacket::read_command1(&mut stream_reader).await?;
-            println!("command: {:?}", packet);
+            let packet = match TunnelCommandPacket::read_command1(&mut stream_reader).await {
+                Ok(packet) => packet,
+                Err(err) => {
+                    eprintln!("[Supernode] Failed to read command packet: {:?}", err);
+                    return Err(err);
+                }
+            };
+            println!("[Supernode] Received command: {:?}", packet.command);
             match packet.command {
                 TunnelCommand::Forward => {
-                    forward_to_tcp(stream_reader, stream_writer, packet, Option::None).await?;
+                    println!("[Supernode] Forward command meta: {:?}", packet.meta);
+                    if let Err(err) =
+                        forward_to_tcp(stream_reader, stream_writer, packet, Option::None).await
+                    {
+                        eprintln!("[Supernode] forward_to_tcp failed: {:?}", err);
+                        return Err(err);
+                    }
                 }
                 TunnelCommand::Ping => {
                     let client_id = match packet.meta.get(AUTH_TOKEN_KEY) {
@@ -69,7 +87,12 @@ async fn start_transport(config: ServerConfig) -> anyhow::Result<()> {
                     if let Some(mut entry) = TRANSPORT_SESSION_MAP.get_mut(client_id) {
                         println!("[QUIC Server] Session found, updating ping_at");
                         entry.value_mut().ping_at = Instant::now();
-                        response_command(stream_writer, TunnelCommand::Pong, &packet.meta).await?;
+                        if let Err(err) =
+                            response_command(stream_writer, TunnelCommand::Pong, &packet.meta).await
+                        {
+                            eprintln!("[Supernode] Failed to respond Pong: {:?}", err);
+                            return Err(err);
+                        }
                     } else {
                         eprintln!(
                             "[QUIC Server] Session not found for client_id: {}",
@@ -94,7 +117,12 @@ async fn start_transport(config: ServerConfig) -> anyhow::Result<()> {
                             meta = TunnelMeta::from([("result".to_string(), Value::Bool(true))]);
                         }
                     }
-                    response_command(stream_writer, TunnelCommand::AuthResult, &meta).await?;
+                    if let Err(err) =
+                        response_command(stream_writer, TunnelCommand::AuthResult, &meta).await
+                    {
+                        eprintln!("[Supernode] Failed to respond AuthResult: {:?}", err);
+                        return Err(err);
+                    }
                 }
                 _ => {
                     eprintln!("Unsupported command: {:?}", packet.command);
