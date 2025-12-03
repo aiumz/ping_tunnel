@@ -55,18 +55,25 @@ jobs:
         if: matrix.rust_target == 'aarch64-unknown-linux-musl'
         run: |
           TOOLCHAIN_DIR=/opt/aarch64-linux-musl-cross
-          ARCHIVE=/tmp/aarch64-linux-musl-cross.tgz
           set -euo pipefail
           sudo rm -rf "${TOOLCHAIN_DIR}"
           sudo mkdir -p /opt
-          URLS=(
-            "https://musl.cc/aarch64-linux-musl-cross.tgz"
-            "https://github.com/messense/musl-cross/releases/latest/download/aarch64-linux-musl-cross.tgz"
+          MIRRORS=(
+            "https://musl.cc/aarch64-linux-musl-cross.tgz|tgz"
+            "https://github.com/messense/musl-cross/releases/latest/download/aarch64-linux-musl-cross.tar.xz|tar.xz"
           )
           success=0
-          for url in "${URLS[@]}"; do
+          for entry in "${MIRRORS[@]}"; do
+            url="${entry%%|*}"
+            ext="${entry##*|}"
+            ARCHIVE="/tmp/aarch64-linux-musl-cross.${ext}"
             echo "Attempting to download toolchain from ${url}"
             if curl -fSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 600 "${url}" -o "${ARCHIVE}"; then
+              case "${ext}" in
+                tgz) sudo tar -xzf "${ARCHIVE}" -C /opt ;;
+                tar.xz) sudo tar -xJf "${ARCHIVE}" -C /opt ;;
+                *) echo "Unknown archive extension: ${ext}"; exit 1 ;;
+              esac
               success=1
               break
             else
@@ -78,7 +85,6 @@ jobs:
             exit 1
           fi
 
-          sudo tar -xzf "${ARCHIVE}" -C /opt
           echo "/opt/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
           {
             echo "CC_aarch64_unknown_linux_musl=/opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc"
@@ -137,6 +143,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: ./dist
