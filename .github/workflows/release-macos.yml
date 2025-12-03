@@ -1,0 +1,106 @@
+name: Build and Release (macOS)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - rust_target: x86_64-apple-darwin
+            artifact_name: darwin-x64
+          - rust_target: aarch64-apple-darwin
+            artifact_name: darwin-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install napi CLI
+        run: npm install -g @napi-rs/cli
+
+      - name: Build .node (Node.js plugin - macOS)
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        run: |
+          mkdir -p dist/${{ matrix.artifact_name }}
+          npm install
+          napi build --release --target ${{ matrix.rust_target }} --features napi -o dist/${{ matrix.artifact_name }}
+          NODE_FILE=$(find dist/${{ matrix.artifact_name }} -name "ping_tunnel*.node" -type f | head -1)
+          if [[ -n "$NODE_FILE" ]]; then
+            mv "$NODE_FILE" dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
+          else
+            echo "Error: .node file not found in dist/${{ matrix.artifact_name }}"
+            ls -la dist/${{ matrix.artifact_name }}/
+            exit 1
+          fi
+
+      - name: Build binaries (Rust - macOS)
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        run: |
+          mkdir -p dist/${{ matrix.artifact_name }}
+          cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
+          cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
+          cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}*
+            dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install -y gh
+
+      - name: Publish macOS artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          TITLE="${TAG}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes "Release $TAG"
+          else
+            echo "Release $TAG already exists, uploading assets..."
+          fi
+
+          gh release upload "$TAG" --clobber \
+            ./dist/darwin-x64/edge-darwin-x64.node \
+            ./dist/darwin-x64/edge-darwin-x64 \
+            ./dist/darwin-x64/supernode-darwin-x64
+
+          gh release upload "$TAG" --clobber \
+            ./dist/darwin-arm/edge-darwin-arm.node \
+            ./dist/darwin-arm/edge-darwin-arm \
+            ./dist/darwin-arm/supernode-darwin-arm
