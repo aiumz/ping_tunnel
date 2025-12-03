@@ -81,9 +81,9 @@ jobs:
             echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=/opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc"
           } >> "$GITHUB_ENV"
 
-      # Build .node for Node.js plugin (GNU target)
-      - name: Build .node (Node.js plugin - Linux/Mac)
-        if: matrix.rust_target == 'x86_64-unknown-linux-gnu' || matrix.rust_target == 'aarch64-unknown-linux-gnu'
+      # Build .node for Node.js plugin (Linux/macOS)
+      - name: Build .node (Node.js plugin - Linux/macOS)
+        if: matrix.os == 'macos-latest' || matrix.rust_target == 'x86_64-unknown-linux-gnu' || matrix.rust_target == 'aarch64-unknown-linux-gnu'
         env:
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
@@ -106,6 +106,7 @@ jobs:
         env:
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
+          mkdir -p dist/${{ matrix.artifact_name }}
           cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
           cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
           cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
@@ -116,6 +117,18 @@ jobs:
         env:
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
+          mkdir -p dist/${{ matrix.artifact_name }}
+          cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
+          cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
+          cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
+
+      # Build binaries for macOS targets
+      - name: Build binaries (Rust - macOS)
+        if: matrix.os == 'macos-latest'
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        run: |
+          mkdir -p dist/${{ matrix.artifact_name }}
           cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
           cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
           cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
@@ -158,7 +171,6 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: |
-            dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
             dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}*
             dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}*
 
@@ -191,10 +203,8 @@ jobs:
             ./dist/linux-arm-gnu/edge-linux-arm-gnu.node \
             ./dist/linux-arm-gnu/edge-linux-arm-gnu \
             ./dist/linux-arm-gnu/supernode-linux-arm-gnu \
-            ./dist/linux-x64-musl/edge-linux-x64-musl.node \
             ./dist/linux-x64-musl/edge-linux-x64-musl \
             ./dist/linux-x64-musl/supernode-linux-x64-musl \
-            ./dist/linux-arm-musl/edge-linux-arm-musl.node \
             ./dist/linux-arm-musl/edge-linux-arm-musl \
             ./dist/linux-arm-musl/supernode-linux-arm-musl \
             ./dist/darwin-x64/edge-darwin-x64.node \
