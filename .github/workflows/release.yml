@@ -11,12 +11,20 @@ jobs:
     strategy:
       matrix:
         include:
+          # 使用 gnu 目标构建 Node.js 插件
           - os: ubuntu-latest
             rust_target: x86_64-unknown-linux-gnu
-            artifact_name: linux-x64
+            artifact_name: linux-x64-gnu
           - os: ubuntu-latest
             rust_target: aarch64-unknown-linux-gnu
-            artifact_name: linux-arm
+            artifact_name: linux-arm-gnu
+          # 使用 musl 目标构建 Rust 可执行文件
+          - os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-musl
+            artifact_name: linux-x64-musl
+          - os: ubuntu-latest
+            rust_target: aarch64-unknown-linux-musl
+            artifact_name: linux-arm-musl
           - os: macos-latest
             rust_target: x86_64-apple-darwin
             artifact_name: darwin-x64
@@ -43,16 +51,17 @@ jobs:
       - name: Install napi CLI
         run: npm install -g @napi-rs/cli
 
-      - name: Install cross-compilation tools (Linux ARM)
-        if: matrix.rust_target == 'aarch64-unknown-linux-gnu'
+      # Linux cross-compilation tools for musl
+      - name: Install cross-compilation tools (Linux musl)
+        if: matrix.rust_target == 'x86_64-unknown-linux-musl' || matrix.rust_target == 'aarch64-unknown-linux-musl'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Build .node (Linux/Mac)
-        if: matrix.os != 'windows-latest'
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu pkg-config libssl-dev
+
+      # Build .node for Node.js plugin (GNU target)
+      - name: Build .node (Node.js plugin - Linux/Mac)
+        if: matrix.rust_target == 'x86_64-unknown-linux-gnu' || matrix.rust_target == 'aarch64-unknown-linux-gnu'
         env:
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
           mkdir -p dist/${{ matrix.artifact_name }}
@@ -67,16 +76,28 @@ jobs:
             ls -la dist/${{ matrix.artifact_name }}/
             exit 1
           fi
-      - name: Build binaries (Linux/Mac)
-        if: matrix.os != 'windows-latest'
+
+      # Build Rust binaries (Linux/Mac) for musl target
+      - name: Build binaries (Rust - musl)
+        if: matrix.rust_target == 'x86_64-unknown-linux-musl' || matrix.rust_target == 'aarch64-unknown-linux-musl'
         env:
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
         run: |
           cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
           cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
           cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
+
+      # Build binaries (Linux/Mac) for gnu target (Node.js plugin)
+      - name: Build binaries (Rust - gnu target)
+        if: matrix.rust_target == 'x86_64-unknown-linux-gnu' || matrix.rust_target == 'aarch64-unknown-linux-gnu'
+        env:
+          AWS_LC_SYS_SKIP_COMPILER_TESTS: 1
+        run: |
+          cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
+          cp target/${{ matrix.rust_target }}/release/edge dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}
+          cp target/${{ matrix.rust_target }}/release/supernode dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}
+
+      # Build .node for Windows
       - name: Build .node (Windows)
         if: matrix.os == 'windows-latest'
         env:
@@ -96,6 +117,8 @@ jobs:
             Get-ChildItem -Path "dist\${{ matrix.artifact_name }}"
             exit 1
           }
+
+      # Build binaries (Windows)
       - name: Build binaries (Windows)
         if: matrix.os == 'windows-latest'
         env:
@@ -105,6 +128,8 @@ jobs:
           cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
           Copy-Item -Path "target\${{ matrix.rust_target }}\release\edge.exe" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.exe"
           Copy-Item -Path "target\${{ matrix.rust_target }}\release\supernode.exe" -Destination "dist\${{ matrix.artifact_name }}\supernode-${{ matrix.artifact_name }}.exe"
+
+      # Upload artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -113,6 +138,7 @@ jobs:
             dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}.node
             dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}*
             dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}*
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -130,17 +156,24 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y gh
+
       - name: Create GitHub Release and Upload Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ github.ref_name }} \
-            ./dist/linux-x64/edge-linux-x64.node \
-            ./dist/linux-x64/edge-linux-x64 \
-            ./dist/linux-x64/supernode-linux-x64 \
-            ./dist/linux-arm/edge-linux-arm.node \
-            ./dist/linux-arm/edge-linux-arm \
-            ./dist/linux-arm/supernode-linux-arm \
+            ./dist/linux-x64-gnu/edge-linux-x64.node \
+            ./dist/linux-x64-gnu/edge-linux-x64 \
+            ./dist/linux-x64-gnu/supernode-linux-x64 \
+            ./dist/linux-arm-gnu/edge-linux-arm.node \
+            ./dist/linux-arm-gnu/edge-linux-arm \
+            ./dist/linux-arm-gnu/supernode-linux-arm \
+            ./dist/linux-x64-musl/edge-linux-x64-musl.node \
+            ./dist/linux-x64-musl/edge-linux-x64-musl \
+            ./dist/linux-x64-musl/supernode-linux-x64-musl \
+            ./dist/linux-arm-musl/edge-linux-arm-musl.node \
+            ./dist/linux-arm-musl/edge-linux-arm-musl \
+            ./dist/linux-arm-musl/supernode-linux-arm-musl \
             ./dist/darwin-x64/edge-darwin-x64.node \
             ./dist/darwin-x64/edge-darwin-x64 \
             ./dist/darwin-x64/supernode-darwin-x64 \
