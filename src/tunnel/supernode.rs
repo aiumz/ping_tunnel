@@ -5,12 +5,12 @@ use crate::tunnel::common::{AUTH_TOKEN_KEY, get_client_id_from_token};
 use crate::tunnel::inbound::{InboundConfig, bind_tcp_inbound};
 use crate::tunnel::outbound::forward_to_tcp;
 use crate::tunnel::packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta};
-use crate::tunnel::session::{TRANSPORT_SESSION_MAP, TransportSession, clear_expired_sessions};
+use crate::tunnel::session::{
+    TransportSession, get_session, insert_session, refresh_session_by_id,
+};
 use serde_json::Value;
-use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::io::WriteHalf;
-use tokio::time::Instant;
 
 pub async fn start_server(
     quic_bind_addr: String,
@@ -30,13 +30,6 @@ pub async fn start_server(
     let inbound_config = InboundConfig {
         inbound_addr: tcp_bind_addr.clone(),
     };
-    // tokio::spawn(async move {
-    //     loop {
-    //         tokio::time::sleep(Duration::from_secs(10 * 60)).await;
-    //         println!("[Supernode] Clearing expired transport sessions...");
-    //         clear_expired_sessions().await;
-    //     }
-    // });
 
     register_on_accept_stream(move |_conn, stream| async move {
         println!("[Supernode] Bi-directional QUIC stream accepted, waiting for command...");
@@ -66,9 +59,9 @@ pub async fn start_server(
                 };
                 println!("[QUIC Server] Ping from client_id: {}", client_id);
 
-                if let Some(mut entry) = TRANSPORT_SESSION_MAP.get_mut(client_id) {
+                if let Some(mut session) = get_session(client_id).await {
                     println!("[QUIC Server] Session found, updating ping_at");
-                    entry.value_mut().ping_at = Instant::now();
+                    refresh_session_by_id(client_id).await;
                     if let Err(err) =
                         response_command(stream_writer, TunnelCommand::Pong, &packet.meta).await
                     {
@@ -88,14 +81,14 @@ pub async fn start_server(
                 if let Some(token) = token {
                     if let Some(token_str) = token.as_str() {
                         let client_id = get_client_id_from_token(token_str);
-                        TRANSPORT_SESSION_MAP.insert(
+                        insert_session(
                             client_id,
                             TransportSession {
                                 conn: _conn.clone(),
                                 meta: packet.meta.clone(),
-                                ping_at: Instant::now(),
                             },
-                        );
+                        )
+                        .await;
                         meta = TunnelMeta::from([("result".to_string(), Value::Bool(true))]);
                     }
                 }
@@ -113,18 +106,15 @@ pub async fn start_server(
 
         Ok(())
     });
-    let server = QuinnServerEndpoint::bind(config).await?;
 
-    // let result = bind_tcp_inbound(inbound_config).await;
-    // if let Err(e) = result {
-    //     eprintln!("[Supernode] Inbound error: {:?}", e);
-    // } else {
-    //     println!("[Supernode] Inbound closed");
-    // }
+    if let Err(e) = QuinnServerEndpoint::bind(config).await {
+        eprintln!("[Supernode] Failed to bind QUIC server: {:?}", e);
+        return Err(e);
+    }
 
-    loop {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        println!("[Supernode] Sleeping for 30 seconds");
+    if let Err(e) = bind_tcp_inbound(inbound_config).await {
+        eprintln!("[Supernode] Failed to bind TCP inbound: {:?}", e);
+        return Err(e);
     }
     Ok(())
 }

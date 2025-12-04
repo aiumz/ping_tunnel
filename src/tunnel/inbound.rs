@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 use crate::tunnel::{
     common::FORWARD_TO_KEY,
     packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta},
-    session::{TRANSPORT_SESSION_MAP, get_default_session, get_session},
+    session::{get_default_session, get_session, remove_session},
     sniff,
 };
 
@@ -44,19 +44,17 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
                     };
                     println!("request_info: {:?}", request_info);
                     let tunnel_id = request_info.tunnel_id.clone();
-                    let session = get_default_session().or_else(|| get_session(&tunnel_id));
+                    let mut session = get_default_session().await;
+                    if session.is_none() {
+                        session = get_session(&tunnel_id).await;
+                    }
                     println!("session: {:?}", session.is_some());
                     if let Some(session) = session {
-                        if session.ping_at.elapsed().as_secs() > 60 {
-                            eprintln!("session timeout, will remove session");
-                            TRANSPORT_SESSION_MAP.remove(&tunnel_id);
-                            return;
-                        }
                         let upstream_stream = match session.conn.open_stream().await {
                             Ok(stream) => stream,
                             Err(e) => {
                                 eprintln!("open_stream error: {:?}", e);
-                                TRANSPORT_SESSION_MAP.remove(&tunnel_id);
+                                remove_session(&tunnel_id).await;
                                 return;
                             }
                         };

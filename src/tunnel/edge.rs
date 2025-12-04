@@ -5,8 +5,10 @@ use crate::tunnel::common::AUTH_TOKEN_KEY;
 use crate::tunnel::inbound::{InboundConfig, bind_tcp_inbound};
 use crate::tunnel::outbound::forward_to_tcp;
 use crate::tunnel::packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta};
-use crate::tunnel::session::DEFAULT_CLIENT_ID;
-use crate::tunnel::session::{TRANSPORT_SESSION_MAP, TransportSession, get_default_session};
+use crate::tunnel::session::{DEFAULT_CLIENT_ID, refresh_session_by_id};
+use crate::tunnel::session::{
+    TransportSession, get_default_session, insert_session, remove_session,
+};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
@@ -68,48 +70,54 @@ async fn start_transport(server_addr: String, token: String) -> anyhow::Result<(
     const SLEEP_TIME: Duration = Duration::from_secs(10);
     let meta = TunnelMeta::from([(AUTH_TOKEN_KEY.to_string(), Value::String(token.clone()))]);
     loop {
-        println!("Connecting to server...");
+        println!("Connecting to server... is_connected: {}", is_connected);
         if !is_connected {
             let config = config.clone();
             if let Ok(client) = QuinnClientEndpoint::connect(config).await {
-                TRANSPORT_SESSION_MAP.insert(
+                println!("Connected successfully!");
+                insert_session(
                     DEFAULT_CLIENT_ID.to_string(),
                     TransportSession {
                         conn: client.conn.clone(),
                         meta: std::collections::HashMap::new(),
-                        ping_at: tokio::time::Instant::now(),
                     },
-                );
-                println!("Connected successfully!");
-                is_connected = true;
+                )
+                .await;
+                if let Ok(response) = send_command(TunnelCommand::Auth, &meta).await {
+                    if response.meta.get("result").unwrap().as_bool().unwrap() {
+                        println!("Auth successful");
+                        is_connected = true;
+                    } else {
+                        eprintln!("Auth failed: invalid response");
+                        is_connected = false;
+                        remove_session(DEFAULT_CLIENT_ID).await;
+                        tokio::time::sleep(SLEEP_TIME).await;
+                        continue;
+                    }
+                }
             } else {
                 tokio::time::sleep(SLEEP_TIME).await;
                 continue;
             }
-            println!("Connected successfully!");
-
-            if let Ok(response) = send_command(TunnelCommand::Auth, &meta).await {
-                if response.meta.get("result").unwrap().as_bool().unwrap() {
-                    println!("Auth successful");
+        } else {
+            if let Ok(response) = send_command(TunnelCommand::Ping, &meta).await {
+                if response.command as u8 == TunnelCommand::Pong as u8 {
+                    println!("Ping successful");
                     is_connected = true;
+                    refresh_session_by_id(DEFAULT_CLIENT_ID).await;
                 } else {
-                    eprintln!("Auth failed: invalid response");
-                    TRANSPORT_SESSION_MAP.remove(DEFAULT_CLIENT_ID);
-                    tokio::time::sleep(SLEEP_TIME).await;
-                    continue;
+                    eprintln!("Ping failed: invalid response");
+                    is_connected = false;
+                    remove_session(DEFAULT_CLIENT_ID).await;
                 }
-            }
-        }
-        if let Ok(response) = send_command(TunnelCommand::Ping, &meta).await {
-            if response.command as u8 == TunnelCommand::Pong as u8 {
-                println!("Ping successful");
-                is_connected = true;
             } else {
-                eprintln!("Ping failed: invalid response");
                 is_connected = false;
-                TRANSPORT_SESSION_MAP.remove(DEFAULT_CLIENT_ID);
+                remove_session(DEFAULT_CLIENT_ID).await;
+                tokio::time::sleep(SLEEP_TIME).await;
+                continue;
             }
         }
+
         tokio::time::sleep(SLEEP_TIME).await;
         continue;
     }
@@ -119,8 +127,7 @@ async fn send_command(
     command: TunnelCommand,
     meta: &TunnelMeta,
 ) -> Result<TunnelCommandPacket, anyhow::Error> {
-    let session = get_default_session();
-    if let Some(session) = session {
+    if let Some(session) = get_default_session().await {
         tokio::time::timeout(Duration::from_secs(10), async {
             let stream = session
                 .conn

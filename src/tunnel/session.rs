@@ -1,9 +1,10 @@
 use std::{
     collections::HashMap,
     sync::{Arc, LazyLock},
+    time::Duration,
 };
 
-use dashmap::DashMap;
+use moka::future::Cache;
 use serde_json::Value;
 
 use crate::transport::base::TransportConnection;
@@ -14,27 +15,35 @@ pub const DEFAULT_CLIENT_ID: &str = "default_client_id";
 pub struct TransportSession {
     pub conn: Arc<dyn TransportConnection + Send + Sync + 'static>,
     pub meta: HashMap<String, Value>,
-    pub ping_at: tokio::time::Instant,
 }
 
-pub static TRANSPORT_SESSION_MAP: LazyLock<DashMap<String, TransportSession>> =
-    LazyLock::new(|| DashMap::new());
+pub static TRANSPORT_SESSION_CACHE: LazyLock<Cache<String, TransportSession>> =
+    LazyLock::new(|| {
+        Cache::builder()
+            .time_to_live(Duration::from_secs(60))
+            .build()
+    });
 
-pub fn get_session(id: &str) -> Option<TransportSession> {
-    TRANSPORT_SESSION_MAP
-        .get(id)
-        .map(|session| session.value().clone())
+pub async fn insert_session(id: String, session: TransportSession) {
+    TRANSPORT_SESSION_CACHE.insert(id, session).await;
 }
 
-pub fn get_default_session() -> Option<TransportSession> {
-    get_session(DEFAULT_CLIENT_ID)
+pub async fn remove_session(id: &str) {
+    TRANSPORT_SESSION_CACHE.invalidate(id).await;
 }
 
-pub async fn clear_expired_sessions() {
-    TRANSPORT_SESSION_MAP
-        .iter()
-        .filter(|session| session.value().ping_at.elapsed().as_secs() > 60)
-        .for_each(|session| {
-            TRANSPORT_SESSION_MAP.remove(session.key());
-        });
+pub async fn get_session(id: &str) -> Option<TransportSession> {
+    TRANSPORT_SESSION_CACHE.get(id).await
+}
+
+pub async fn get_default_session() -> Option<TransportSession> {
+    get_session(DEFAULT_CLIENT_ID).await
+}
+
+pub async fn refresh_session_by_id(id: &str) {
+    if let Some(session) = TRANSPORT_SESSION_CACHE.get(id).await {
+        TRANSPORT_SESSION_CACHE
+            .insert(id.to_string(), session)
+            .await;
+    }
 }
