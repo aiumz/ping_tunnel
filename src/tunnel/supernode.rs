@@ -30,13 +30,13 @@ pub async fn start_server(
     let inbound_config = InboundConfig {
         inbound_addr: tcp_bind_addr.clone(),
     };
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
-            println!("[Supernode] Clearing expired transport sessions...");
-            clear_expired_sessions().await;
-        }
-    });
+    // tokio::spawn(async move {
+    //     loop {
+    //         tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+    //         println!("[Supernode] Clearing expired transport sessions...");
+    //         clear_expired_sessions().await;
+    //     }
+    // });
 
     register_on_accept_stream(move |_conn, stream| async move {
         println!("[Supernode] Bi-directional QUIC stream accepted, waiting for command...");
