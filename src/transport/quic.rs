@@ -1,3 +1,4 @@
+use crate::transport::accept::call_on_accept_stream;
 use crate::transport::base::{
     ClientConfig, ServerConfig, TransformClient, TransformServer, TransportConnection,
     TransportKind, TransportStream,
@@ -76,15 +77,7 @@ impl TransportConnection for QuinnConnection {
     }
 }
 
-pub struct QuinnServerEndpoint {
-    pub endpoint: Option<Endpoint>,
-}
-
-impl QuinnServerEndpoint {
-    pub fn new() -> Self {
-        Self { endpoint: None }
-    }
-}
+pub struct QuinnServerEndpoint {}
 
 #[async_trait::async_trait]
 impl TransformServer for QuinnServerEndpoint {
@@ -110,100 +103,49 @@ impl TransformServer for QuinnServerEndpoint {
         let mut server_config =
             quinn::ServerConfig::with_crypto(std::sync::Arc::new(quic_server_config));
         server_config.transport = std::sync::Arc::new(transport_config);
-        let endpoint = Endpoint::server(server_config, config.addr.parse().unwrap()).unwrap();
-        Ok(Arc::new(QuinnServerEndpoint {
-            endpoint: Some(endpoint),
-        }))
-    }
-    async fn accept<'a, F, Fut>(&'a self, callback: F) -> Result<(), anyhow::Error>
-    where
-        F: Fn(
-                Arc<dyn TransportConnection + Send + Sync + 'static>,
-                Box<dyn TransportStream>,
-            ) -> Fut
-            + Send
-            + Sync
-            + 'static,
-        Fut: Future<Output = Result<(), anyhow::Error>> + Send + 'static,
-    {
-        let callback = Arc::new(callback);
-        if let Some(endpoint) = self.endpoint.as_ref() {
-            println!("[QUIC Server] Endpoint started, waiting for new QUIC connections...");
-            loop {
-                match endpoint.accept().await {
-                    Some(connecting) => {
-                        let callback = callback.clone();
-                        tokio::spawn(async move {
-                            let callback = callback.clone();
-                            println!(
-                                "[QUIC Server] Incoming QUIC connection, waiting for handshake..."
-                            );
-                            match connecting.await {
-                                Ok(conn) => {
-                                    let conn_box = Arc::new(QuinnConnection { conn: conn.clone() });
-                                    loop {
-                                        let conn_for_accept = conn.clone();
-                                        match conn_for_accept.accept_bi().await {
-                                            Ok((send, recv)) => {
-                                                let callback = callback.clone();
-                                                let conn_for_callback = conn_box.clone();
-                                                tokio::spawn(async move {
-                                                    if let Err(err) = callback(
-                                                        conn_for_callback,
-                                                        Box::new(QuinnStream { send, recv }),
-                                                    )
-                                                    .await
-                                                    {
-                                                        eprintln!(
-                                                            "[QUIC Server] Stream callback error: {:?}",
-                                                            err
-                                                        );
-                                                    }
-                                                });
-                                            }
-                                            Err(e) => {
-                                                eprintln!(
-                                                    "[QUIC Server] accept_bi failed: {:?}",
-                                                    e
-                                                );
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    conn.close(VarInt::from(0u32), b"");
-                                    println!(
-                                        "[QUIC Server] Stream accept loop ended for connection"
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!("[ERROR] Connection handshake failed: {:?}", e);
-                                }
-                            }
+
+        let endpoint = match Endpoint::server(server_config, config.addr.parse().unwrap()) {
+            Ok(endpoint) => endpoint,
+            Err(e) => {
+                eprintln!("[QUIC Server] Failed to bind QUIC endpoint: {:?}", e);
+                return Err(anyhow::anyhow!(e));
+            }
+        };
+
+        println!("[QUIC Server] Endpoint started, waiting for new QUIC connections...");
+        tokio::spawn(async move {
+            while let Some(connecting) = endpoint.accept().await {
+                if let Ok(conn) = connecting.await {
+                    let conn_clone = conn.clone();
+                    tokio::spawn(async move {
+                        let connection = Arc::new(QuinnConnection {
+                            conn: conn_clone.clone(),
                         });
-                    }
-                    None => {
-                        eprintln!(
-                            "[QUIC Server] endpoint.accept() returned None, endpoint may be closed"
-                        );
-                        break;
-                    }
+                        while let Ok((send, recv)) = conn_clone.accept_bi().await {
+                            let connection = connection.clone();
+                            tokio::spawn(async move {
+                                let _ = call_on_accept_stream(
+                                    connection,
+                                    Box::new(QuinnStream { send, recv }),
+                                )
+                                .await;
+                            });
+                        }
+                    });
                 }
             }
-            println!("[QUIC Server] Endpoint.accept() loop ended (no more incoming connections).");
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Endpoint not found"))
-        }
+        });
+        Ok(Arc::new(QuinnServerEndpoint {}))
     }
 }
 
 pub struct QuinnClientEndpoint {
-    pub conn: quinn::Connection,
+    pub conn: Arc<QuinnConnection>,
 }
 
 #[async_trait::async_trait]
 impl TransformClient for QuinnClientEndpoint {
-    async fn connect(config: ClientConfig) -> anyhow::Result<Arc<Self>> {
+    async fn connect(config: ClientConfig) -> Result<Arc<Self>, anyhow::Error> {
         crate::transport::cert::install_default_crypto_provider();
 
         let mut client_config = RustlsClientConfig::builder()
@@ -236,80 +178,46 @@ impl TransformClient for QuinnClientEndpoint {
         let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
         endpoint.set_default_client_config(client_config);
 
-        loop {
-            println!("Connecting to Server: {} ...", config.addr);
-            let addr = match config.addr.parse() {
-                Ok(addr) => addr,
-                Err(e) => {
-                    eprintln!("Invalid server address: {}", e);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    continue;
-                }
-            };
-            let conn = match tokio::time::timeout(Duration::from_secs(10), async {
-                let connecting = endpoint.connect(addr, "localhost");
-                let connecting = match connecting {
-                    Ok(connecting) => connecting,
-                    Err(e) => {
-                        eprintln!("Connection error: {}", e);
-                        return Err(anyhow::anyhow!(e));
-                    }
-                };
-                connecting.await.map_err(|e| {
-                    eprintln!("Connection handshake error: {}", e);
-                    anyhow::anyhow!(e)
-                })
-            })
-            .await
-            {
-                Ok(Ok(conn)) => {
-                    println!("Connected to Server successfully: {}", config.addr);
-                    conn
-                }
-                Ok(Err(e)) => {
-                    eprintln!("Failed to connect to Server: {}", e);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    continue;
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Connection timeout after 10s: {:?}, retrying in 2 seconds...",
-                        e
-                    );
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    continue;
-                }
-            };
-            return Ok(Arc::new(QuinnClientEndpoint { conn }));
-        }
-    }
+        println!("Connecting to Server: {} ...", config.addr);
+        let addr = match config.addr.parse() {
+            Ok(addr) => addr,
+            Err(e) => {
+                eprintln!("Invalid server address: {}", e);
+                return Err(anyhow::anyhow!("Invalid server address: {}", e));
+            }
+        };
+        let connecting = endpoint.connect(addr, "localhost");
+        let connecting = match connecting {
+            Ok(connecting) => connecting,
+            Err(e) => {
+                eprintln!("Connection error: {}", e);
+                return Err(anyhow::anyhow!(e));
+            }
+        };
 
-    async fn accept<'a, F, Fut>(&'a self, callback: F) -> anyhow::Result<()>
-    where
-        F: Fn(Box<dyn TransportStream>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<(), anyhow::Error>> + Send + 'static,
-    {
-        let conn = self.conn.clone();
-        let callback = Arc::new(callback);
+        let conn = match connecting.await {
+            Ok(conn) => conn,
+            Err(e) => {
+                eprintln!("Connection handshake error: {}", e);
+                return Err(anyhow::anyhow!("Connection handshake error: {}", e));
+            }
+        };
+
+        let conn_box = Arc::new(QuinnConnection { conn: conn.clone() });
+        let conn_for_accept = conn_box.clone();
         tokio::spawn(async move {
-            while let Ok((send, recv)) = conn.accept_bi().await {
-                let callback = callback.clone();
+            while let Ok(stream) = conn_for_accept.open_stream().await {
+                let conn_for_callback = conn_for_accept.clone();
                 tokio::spawn(async move {
-                    let _ = callback(Box::new(QuinnStream { send, recv })).await;
+                    let _ = call_on_accept_stream(conn_for_callback, stream).await;
                 });
             }
-        })
-        .await?;
-        Ok(())
+        });
+
+        Ok(Arc::new(QuinnClientEndpoint { conn: conn_box }))
     }
 
     async fn close(&self) -> anyhow::Result<()> {
-        return Ok(());
-    }
-
-    fn get_conn(&self) -> Arc<dyn TransportConnection + Send + Sync + 'static> {
-        Arc::new(QuinnConnection {
-            conn: self.conn.clone(),
-        })
+        Ok(())
     }
 }

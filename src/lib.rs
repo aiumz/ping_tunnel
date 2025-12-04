@@ -9,11 +9,7 @@ pub mod tunnel {
     pub mod supernode;
 }
 
-pub mod transport {
-    pub mod base;
-    pub mod cert;
-    pub mod quic;
-}
+pub mod transport;
 
 #[cfg(feature = "napi")]
 use napi_derive::napi;

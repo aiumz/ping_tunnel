@@ -1,3 +1,4 @@
+use crate::transport::accept::register_on_accept_stream;
 use crate::transport::base::{ClientConfig, TransformClient};
 use crate::transport::quic::QuinnClientEndpoint;
 use crate::tunnel::common::AUTH_TOKEN_KEY;
@@ -7,6 +8,7 @@ use crate::tunnel::packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta};
 use crate::tunnel::session::DEFAULT_CLIENT_ID;
 use crate::tunnel::session::{TRANSPORT_SESSION_MAP, TransportSession, get_default_session};
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
@@ -15,8 +17,33 @@ pub async fn start_client(
     token: String,
     forward_to: String,
 ) -> anyhow::Result<()> {
+    let forward_to = Arc::new(forward_to);
+    register_on_accept_stream(move |_conn, stream| {
+        let forward_to = forward_to.clone();
+        async move {
+            let (mut stream_reader, stream_writer) = tokio::io::split(stream);
+            let packet = TunnelCommandPacket::read_command1(&mut stream_reader).await?;
+            println!("[QUIC Client] Received command: {:?}", packet);
+            match packet.command {
+                TunnelCommand::Forward => {
+                    forward_to_tcp(
+                        stream_reader,
+                        stream_writer,
+                        packet,
+                        Some(forward_to.to_string()),
+                    )
+                    .await?;
+                }
+                _ => {
+                    eprintln!("[QUIC Client] Unsupported command: {:?}", packet.command);
+                }
+            }
+            Ok(())
+        }
+    });
+
     tokio::select! {
-        result = start_transport(server_addr, token, forward_to) => {
+        result = start_transport(server_addr, token) => {
             if let Err(e) = result {
                 eprintln!("Transport error: {:?}", e);
             }
@@ -32,11 +59,7 @@ pub async fn start_client(
     Ok(())
 }
 
-async fn start_transport(
-    server_addr: String,
-    token: String,
-    forward_to: String,
-) -> anyhow::Result<()> {
+async fn start_transport(server_addr: String, token: String) -> anyhow::Result<()> {
     let config = ClientConfig {
         addr: server_addr.clone(),
     };
@@ -45,108 +68,46 @@ async fn start_transport(
     const SLEEP_TIME: Duration = Duration::from_secs(10);
     let meta = TunnelMeta::from([(AUTH_TOKEN_KEY.to_string(), Value::String(token.clone()))]);
     loop {
+        println!("Connecting to server...");
         if !is_connected {
             let config = config.clone();
-            let client = match QuinnClientEndpoint::connect(config).await {
-                Ok(client) => client,
-                Err(e) => {
-                    eprintln!(
-                        "Failed to connect to server: {:?}, retrying in seconds...",
-                        e
-                    );
-                    tokio::time::sleep(SLEEP_TIME).await;
-                    continue;
-                }
-            };
-            TRANSPORT_SESSION_MAP.insert(
-                DEFAULT_CLIENT_ID.to_string(),
-                TransportSession {
-                    conn: client.get_conn(),
-                    meta: std::collections::HashMap::new(),
-                    ping_at: tokio::time::Instant::now(),
-                },
-            );
+            if let Ok(client) = QuinnClientEndpoint::connect(config).await {
+                TRANSPORT_SESSION_MAP.insert(
+                    DEFAULT_CLIENT_ID.to_string(),
+                    TransportSession {
+                        conn: client.conn.clone(),
+                        meta: std::collections::HashMap::new(),
+                        ping_at: tokio::time::Instant::now(),
+                    },
+                );
+                println!("Connected successfully!");
+                is_connected = true;
+            } else {
+                tokio::time::sleep(SLEEP_TIME).await;
+                continue;
+            }
             println!("Connected successfully!");
 
-            match send_command(TunnelCommand::Auth, &meta).await {
-                Ok(response) => {
-                    if response.meta.get("result").unwrap().as_bool().unwrap() {
-                        println!("Auth successful");
-                    } else {
-                        eprintln!("Auth failed: invalid response");
-                        TRANSPORT_SESSION_MAP.remove(DEFAULT_CLIENT_ID);
-                        tokio::time::sleep(SLEEP_TIME).await;
-                        continue;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Auth failed: {}", e);
+            if let Ok(response) = send_command(TunnelCommand::Auth, &meta).await {
+                if response.meta.get("result").unwrap().as_bool().unwrap() {
+                    println!("Auth successful");
+                    is_connected = true;
+                } else {
+                    eprintln!("Auth failed: invalid response");
                     TRANSPORT_SESSION_MAP.remove(DEFAULT_CLIENT_ID);
                     tokio::time::sleep(SLEEP_TIME).await;
                     continue;
                 }
             }
-            {
-                let forward_to = forward_to.clone();
-                let client_for_accept = client.clone();
-                tokio::spawn(async move {
-                    println!("[QUIC Client] Starting accept loop to receive server streams...");
-                    if let Err(e) = client_for_accept
-                        .accept(move |stream| {
-                            let forward_to = forward_to.clone();
-                            async move {
-                                let (mut stream_reader, stream_writer) = tokio::io::split(stream);
-                                let packet =
-                                    TunnelCommandPacket::read_command1(&mut stream_reader).await?;
-                                println!("[QUIC Client] Received command: {:?}", packet);
-                                match packet.command {
-                                    TunnelCommand::Forward => {
-                                        forward_to_tcp(
-                                            stream_reader,
-                                            stream_writer,
-                                            packet,
-                                            Some(forward_to),
-                                        )
-                                        .await?;
-                                    }
-                                    _ => {
-                                        eprintln!(
-                                            "[QUIC Client] Unsupported command: {:?}",
-                                            packet.command
-                                        );
-                                    }
-                                }
-                                Ok(())
-                            }
-                        })
-                        .await
-                    {
-                        eprintln!("[QUIC Client] Accept error: {:?}", e);
-                    }
-                });
-            }
         }
-
-        match send_command(TunnelCommand::Ping, &meta).await {
-            Ok(response) => {
-                if response.command as u8 == TunnelCommand::Pong as u8 {
-                    println!("Ping successful");
-                    is_connected = true;
-                } else {
-                    eprintln!("Ping failed: invalid response");
-                    is_connected = false;
-                    TRANSPORT_SESSION_MAP.remove(DEFAULT_CLIENT_ID);
-                }
-            }
-            Err(e) => {
-                eprintln!(
-                    "Ping failed: {}, connection may be broken, will reconnect",
-                    e
-                );
+        if let Ok(response) = send_command(TunnelCommand::Ping, &meta).await {
+            if response.command as u8 == TunnelCommand::Pong as u8 {
+                println!("Ping successful");
+                is_connected = true;
+            } else {
+                eprintln!("Ping failed: invalid response");
                 is_connected = false;
                 TRANSPORT_SESSION_MAP.remove(DEFAULT_CLIENT_ID);
-                // 连接断开时立即重连，不等待
-                continue;
             }
         }
         tokio::time::sleep(SLEEP_TIME).await;

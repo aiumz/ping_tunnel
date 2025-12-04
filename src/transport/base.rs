@@ -1,6 +1,7 @@
+use anyhow::Result;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
-
 pub trait TransportStream: AsyncWrite + AsyncRead + Unpin + Send + Sync {}
 
 pub enum TransportKind {
@@ -23,17 +24,6 @@ pub trait TransformServer: Send + Sync {
     async fn bind(config: ServerConfig) -> Result<Arc<Self>, anyhow::Error>
     where
         Self: Sized;
-
-    async fn accept<'a, F, Fut>(&'a self, callback: F) -> Result<(), anyhow::Error>
-    where
-        F: Fn(
-                Arc<dyn TransportConnection + Send + Sync + 'static>,
-                Box<dyn TransportStream>,
-            ) -> Fut
-            + Send
-            + Sync
-            + 'static,
-        Fut: Future<Output = Result<(), anyhow::Error>> + Send + 'static;
 }
 
 #[derive(Clone)]
@@ -46,16 +36,9 @@ pub trait TransformClient: Send + Sync + std::any::Any {
     where
         Self: Sized;
 
-    async fn accept<F, Fut>(&self, callback: F) -> Result<(), anyhow::Error>
-    where
-        F: Fn(Box<dyn TransportStream>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<(), anyhow::Error>> + Send + 'static;
-
     async fn close(&self) -> Result<(), anyhow::Error> {
         Ok(())
     }
-
-    fn get_conn(&self) -> Arc<dyn TransportConnection + Send + Sync + 'static>;
 }
 
 #[async_trait::async_trait]

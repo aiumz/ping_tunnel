@@ -1,6 +1,6 @@
 use crate::{
-    tunnel::common::{HEADER_FIXED_LEN, MAX_DATA_LEN},
     transport::base::TransportStream,
+    tunnel::common::{HEADER_FIXED_LEN, MAX_DATA_LEN},
 };
 use serde_json;
 use serde_json::Value;
@@ -114,6 +114,7 @@ impl TunnelCommandPacket {
             length,
             meta: Self::decode_meta(&data_buffer),
         };
+        println!("[QUIC Client] Received command: {:?}", result);
         Ok(result)
     }
 
