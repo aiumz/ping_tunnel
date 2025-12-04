@@ -204,13 +204,21 @@ impl TransformClient for QuinnClientEndpoint {
         };
 
         let conn_box = Arc::new(QuinnConnection { conn: conn.clone() });
-        let conn_for_accept = conn_box.clone();
-        tokio::spawn(async move {
-            while let Ok(stream) = conn_for_accept.open_stream().await {
-                let conn_for_callback = conn_for_accept.clone();
-                tokio::spawn(async move {
-                    let _ = call_on_accept_stream(conn_for_callback, stream).await;
-                });
+        let conn_for_accept = conn.clone();
+
+        tokio::spawn({
+            let conn_box = conn_box.clone();
+            async move {
+                while let Ok((send, recv)) = conn_for_accept.accept_bi().await {
+                    let conn_for_callback = conn_box.clone();
+                    tokio::spawn(async move {
+                        let _ = call_on_accept_stream(
+                            conn_for_callback,
+                            Box::new(QuinnStream { send, recv }),
+                        )
+                        .await;
+                    });
+                }
             }
         });
 

@@ -27,7 +27,7 @@
     "build:all": "echo 'Please build for all platforms manually or use CI/CD'",
     "artifacts": "napi artifacts",
     "version": "napi version",
-    "edge": "QUINN_LOG=trace RUST_LOG=info cargo run --bin edge  -- 127.0.0.1:4433 127 127.0.0.1:11100",
+    "edge": "QUINN_LOG=trace RUST_LOG=info cargo run --bin edge  -- 221.11.37.86:26648 221 127.0.0.1:11100",
     "supernode": "cargo run --bin supernode -- 0.0.0.0:4433 0.0.0.0:4432 ./cert/cert.pem ./cert/key.pem"
   },
   "dependencies": {

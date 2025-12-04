@@ -115,11 +115,16 @@ pub async fn start_server(
     });
     let server = QuinnServerEndpoint::bind(config).await?;
 
-    let result = bind_tcp_inbound(inbound_config).await;
-    if let Err(e) = result {
-        eprintln!("[Supernode] Inbound error: {:?}", e);
-    } else {
-        println!("[Supernode] Inbound closed");
+    // let result = bind_tcp_inbound(inbound_config).await;
+    // if let Err(e) = result {
+    //     eprintln!("[Supernode] Inbound error: {:?}", e);
+    // } else {
+    //     println!("[Supernode] Inbound closed");
+    // }
+
+    loop {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        println!("[Supernode] Sleeping for 30 seconds");
     }
     Ok(())
 }
