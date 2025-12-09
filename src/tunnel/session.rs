@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::transport::base::TransportConnection;
 
 pub const DEFAULT_CLIENT_ID: &str = "default_client_id";
+pub const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 pub struct TransportSession {
@@ -18,11 +19,7 @@ pub struct TransportSession {
 }
 
 pub static TRANSPORT_SESSION_CACHE: LazyLock<Cache<String, TransportSession>> =
-    LazyLock::new(|| {
-        Cache::builder()
-            .time_to_live(Duration::from_secs(60))
-            .build()
-    });
+    LazyLock::new(|| Cache::builder().time_to_live(DEFAULT_SESSION_TTL).build());
 
 pub async fn insert_session(id: String, session: TransportSession) {
     TRANSPORT_SESSION_CACHE.insert(id, session).await;

@@ -21,7 +21,10 @@ pub struct TcpInbound {
     pub listener: TcpListener,
 }
 
-pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, anyhow::Error> {
+pub async fn bind_tcp_inbound(
+    config: InboundConfig,
+    use_default_session: bool,
+) -> Result<Arc<TcpInbound>, anyhow::Error> {
     let listener = TcpListener::bind(config.inbound_addr.clone())
         .await
         .unwrap();
@@ -44,11 +47,12 @@ pub async fn bind_tcp_inbound(config: InboundConfig) -> Result<Arc<TcpInbound>, 
                     };
                     println!("request_info: {:?}", request_info);
                     let tunnel_id = request_info.tunnel_id.clone();
-                    let mut session = get_default_session().await;
-                    if session.is_none() {
-                        session = get_session(&tunnel_id).await;
-                    }
-                    println!("session: {:?}", session.is_some());
+
+                    let session = if use_default_session {
+                        get_default_session().await
+                    } else {
+                        get_session(&tunnel_id).await
+                    };
                     if let Some(session) = session {
                         let upstream_stream = match session.conn.open_stream().await {
                             Ok(stream) => stream,

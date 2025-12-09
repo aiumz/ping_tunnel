@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::future::Future;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 pub trait TransportStream: AsyncWrite + AsyncRead + Unpin + Send + Sync {}

@@ -1,7 +1,4 @@
-use crate::{
-    transport::base::TransportStream,
-    tunnel::common::{HEADER_FIXED_LEN, MAX_DATA_LEN},
-};
+use crate::tunnel::common::{HEADER_FIXED_LEN, MAX_DATA_LEN};
 use serde_json;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -51,40 +48,7 @@ impl TunnelCommandPacket {
         buf
     }
 
-    pub async fn read_command2(
-        stream: &mut Box<dyn TransportStream>,
-    ) -> Result<Self, anyhow::Error> {
-        let mut buffer = [0u8; HEADER_FIXED_LEN];
-        stream.read_exact(&mut buffer).await?;
-        let (command, length) = (
-            buffer[0],
-            u32::from_be_bytes(buffer[1..HEADER_FIXED_LEN].try_into().unwrap()),
-        );
-        let command = match command as u8 {
-            0 => TunnelCommand::Ping,
-            1 => TunnelCommand::Pong,
-            2 => TunnelCommand::Auth,
-            3 => TunnelCommand::AuthResult,
-            4 => TunnelCommand::Forward,
-            _ => return Err(anyhow::anyhow!("Invalid command type")),
-        };
-
-        if length > MAX_DATA_LEN as u32 {
-            return Err(anyhow::anyhow!("Data length is too large {}", length));
-        }
-
-        let mut data_buffer = vec![0u8; length as usize];
-        stream.read_exact(&mut data_buffer).await?;
-
-        let result = Self {
-            command,
-            length,
-            meta: Self::decode_meta(&data_buffer),
-        };
-        Ok(result)
-    }
-
-    pub async fn read_command1(
+    pub async fn read_command(
         reader: &mut (dyn AsyncRead + Unpin + Send),
     ) -> Result<Self, anyhow::Error> {
         let mut buffer = [0u8; HEADER_FIXED_LEN];
@@ -115,50 +79,6 @@ impl TunnelCommandPacket {
             meta: Self::decode_meta(&data_buffer),
         };
         println!("[QUIC Client] Received command: {:?}", result);
-        Ok(result)
-    }
-
-    pub async fn read_command(stream: &mut quinn::RecvStream) -> Result<Self, anyhow::Error> {
-        let mut buffer = [0u8; HEADER_FIXED_LEN];
-        let result = stream.read_exact(&mut buffer);
-        let (command, length) = match result.await {
-            Ok(()) => (
-                buffer[0],
-                u32::from_be_bytes(buffer[1..HEADER_FIXED_LEN].try_into().unwrap()),
-            ),
-            Err(e) => {
-                eprintln!("[ERROR] Error reading stream: {:?}", e);
-                return Err(anyhow::anyhow!("Error reading stream"));
-            }
-        };
-        let command = match command as u8 {
-            0 => TunnelCommand::Ping,
-            1 => TunnelCommand::Pong,
-            2 => TunnelCommand::Auth,
-            3 => TunnelCommand::AuthResult,
-            4 => TunnelCommand::Forward,
-            _ => return Err(anyhow::anyhow!("Invalid command type")),
-        };
-
-        if length > MAX_DATA_LEN as u32 {
-            return Err(anyhow::anyhow!("Data length is too large {}", length));
-        }
-
-        let mut data_buffer = vec![0u8; length as usize];
-        let result = stream.read_exact(&mut data_buffer);
-        let data = match result.await {
-            Ok(()) => Self::decode_meta(&data_buffer),
-            Err(e) => {
-                eprintln!("[ERROR] Error reading stream: {:?}", e);
-                return Err(anyhow::anyhow!("Error reading stream"));
-            }
-        };
-
-        let result = Self {
-            command,
-            length,
-            meta: data,
-        };
         Ok(result)
     }
 }

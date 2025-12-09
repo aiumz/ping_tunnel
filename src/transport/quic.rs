@@ -4,7 +4,7 @@ use crate::transport::base::{
     TransportKind, TransportStream,
 };
 use crate::transport::cert::NoCertificateVerification;
-use quinn::{ClientConfig as QuinnClientConfig, Endpoint, RecvStream, SendStream, VarInt};
+use quinn::{ClientConfig as QuinnClientConfig, Endpoint, RecvStream, SendStream};
 use rustls::ClientConfig as RustlsClientConfig;
 use std::{
     pin::Pin,
@@ -167,10 +167,6 @@ impl TransformClient for QuinnClientEndpoint {
 
         let mut transport_config = quinn::TransportConfig::default();
         transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
-        // 与服务端保持一致：120秒超时
-        // transport_config.max_idle_timeout(Some(
-        //     std::time::Duration::from_secs(120).try_into().unwrap(),
-        // ));
 
         let mut client_config = QuinnClientConfig::new(Arc::new(quic_client_config));
         client_config.transport_config(Arc::new(transport_config));

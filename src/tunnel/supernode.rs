@@ -34,7 +34,7 @@ pub async fn start_server(
     register_on_accept_stream(move |_conn, stream| async move {
         println!("[Supernode] Bi-directional QUIC stream accepted, waiting for command...");
         let (mut stream_reader, stream_writer) = tokio::io::split(stream);
-        let packet = match TunnelCommandPacket::read_command1(&mut stream_reader).await {
+        let packet = match TunnelCommandPacket::read_command(&mut stream_reader).await {
             Ok(packet) => packet,
             Err(err) => {
                 eprintln!("[Supernode] Failed to read command packet: {:?}", err);
@@ -54,12 +54,15 @@ pub async fn start_server(
             }
             TunnelCommand::Ping => {
                 let client_id = match packet.meta.get(AUTH_TOKEN_KEY) {
-                    Some(token) => token.as_str().unwrap(),
+                    Some(token) => match token.as_str() {
+                        Some(token) => token,
+                        None => "",
+                    },
                     None => "",
                 };
                 println!("[QUIC Server] Ping from client_id: {}", client_id);
 
-                if let Some(mut session) = get_session(client_id).await {
+                if get_session(client_id).await.is_some() {
                     println!("[QUIC Server] Session found, updating ping_at");
                     refresh_session_by_id(client_id).await;
                     if let Err(err) =
@@ -112,15 +115,10 @@ pub async fn start_server(
         return Err(e);
     }
 
-    if let Err(e) = bind_tcp_inbound(inbound_config).await {
+    if let Err(e) = bind_tcp_inbound(inbound_config, false).await {
         eprintln!("[Supernode] Failed to bind TCP inbound: {:?}", e);
         return Err(e);
     }
-    Ok(())
-}
-
-async fn start_transport(config: ServerConfig) -> anyhow::Result<()> {
-    let server = QuinnServerEndpoint::bind(config).await?;
     Ok(())
 }
 
