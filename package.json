@@ -22,7 +22,7 @@
     "binaryName": "ping_tunnel"
   },
   "scripts": {
-    "build": "napi build --platform --release --features napi -o ./build",
+    "build": "napi build --platform --release --features napi -o ./build --js false && mv ./build/ping_tunnel.darwin-arm64.node ./nodejs/edge.node",
     "build:debug": "napi build --platform --features napi",
     "build:all": "echo 'Please build for all platforms manually or use CI/CD'",
     "artifacts": "napi artifacts",

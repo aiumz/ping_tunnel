@@ -1,8 +1,7 @@
 use serde_json::{Value, json};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, OnceLock};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
 
 use crate::tunnel::{
     common::FORWARD_TO_KEY,
@@ -11,9 +10,7 @@ use crate::tunnel::{
     sniff,
 };
 
-pub static TCP_INBOUND_ADDR: LazyLock<Arc<RwLock<String>>> =
-    LazyLock::new(|| Arc::new(RwLock::new(String::new())));
-
+pub static TCP_INBOUND_ADDR: OnceLock<String> = OnceLock::new();
 pub struct InboundConfig {
     pub inbound_addr: String,
 }
@@ -29,8 +26,8 @@ pub async fn bind_tcp_inbound(
         .await
         .unwrap();
     if let Ok(addr) = listener.local_addr() {
-        *TCP_INBOUND_ADDR.write().await = addr.to_string();
-        println!("tcp inbound addr: {}", TCP_INBOUND_ADDR.read().await);
+        TCP_INBOUND_ADDR.set(addr.to_string()).unwrap();
+        println!("tcp inbound addr: {}", TCP_INBOUND_ADDR.get().unwrap());
     }
 
     loop {

@@ -92,19 +92,32 @@ cargo run --bin edge -- \
 - `token`: 认证 Token
 - `forward_to`: 转发目标地址
 
+## 预编译二进制
+
+你也可以直接从 GitHub Releases 下载已经构建好的二进制和 Node.js 插件，文件命名约定如下：
+
+| 平台              | 文件名                                                            |
+| ----------------- | ----------------------------------------------------------------- |
+| Linux x86_64 gnu  | `edge-linux-x64.node`                                             |
+| Linux x86_64 musl | `edge-linux-x64`, `supernode-linux-x64`                           |
+| macOS x86_64      | `edge-darwin-x64.node`, `edge-darwin-x64`, `supernode-darwin-x64` |
+| macOS arm64       | `edge-darwin-arm.node`, `edge-darwin-arm`, `supernode-darwin-arm` |
+| Windows x86_64    | `edge-win-x64.node`, `edge-win-x64.exe`, `supernode-win-x64.exe`  |
+
 ## Node.js SDK
 
-### 安装
+### 本地构建
 
 ```bash
-cd node-sdk
+# 在项目根目录
 npm install
+npm run build  # 为当前平台构建 Node.js 原生插件，输出到 nodejs/edge.node
 ```
 
-### 使用示例
+### 使用示例（直接使用当前仓库）
 
 ```javascript
-const { EdgeClient } = require('./index.js');
+const { EdgeClient } = require('./nodejs');
 
 // 创建客户端
 const client = new EdgeClient(
@@ -115,14 +128,18 @@ const client = new EdgeClient(
 
 // 连接到服务器
 client.connect();
+
+// 周期性获取本地 inbound 地址
+setInterval(async () => {
+  const addr = await client.getInboundAddr();
+  console.log('inbound addr:', addr);
+}, 1000);
 ```
 
-或者使用函数式 API：
+如果之后发布为 npm 包，可以在其他项目中这样使用：
 
 ```javascript
-const { connectToServer } = require('./index.js');
-
-connectToServer('127.0.0.1:4433', 'my-secret-token', '127.0.0.1:8080');
+const { EdgeClient } = require('ping_tunnel_edge');
 ```
 
 ## 工作原理
@@ -160,17 +177,15 @@ connectToServer('127.0.0.1:4433', 'my-secret-token', '127.0.0.1:8080');
 ```
 ping-tunnel/
 ├── src/
-│   ├── lib.rs          # 库入口，包含 Node.js 绑定
-│   ├── edge.rs         # Edge 客户端二进制
-│   ├── supernode.rs    # Supernode 服务器二进制
-│   └── lib/
-│       ├── client.rs   # 客户端逻辑
-│       ├── server.rs   # 服务器逻辑
-│       ├── forward.rs  # 流量转发
-│       ├── packet.rs   # 协议包定义
-│       ├── connections.rs # 连接管理
-│       └── ...
-├── node-sdk/           # Node.js SDK
+│   ├── lib.rs          # 库入口，包含 Node.js 绑定和公共导出
+│   ├── edge.rs         # Edge 客户端二进制入口
+│   ├── supernode.rs    # Supernode 服务器二进制入口
+│   ├── transport/      # 传输抽象与 QUIC 实现
+│   └── tunnel/         # Edge/Supernode/会话/转发 等隧道逻辑
+├── nodejs/             # Node.js 绑定包装与示例
+│   ├── index.js
+│   ├── index.d.ts
+│   └── example.js
 └── cert/               # 证书目录
 ```
 

@@ -67,9 +67,12 @@ impl EdgeClient {
 
     #[napi]
     pub async fn get_inbound_addr(&self) -> napi::Result<String> {
-        Ok(crate::tunnel::inbound::TCP_INBOUND_ADDR
-            .read()
-            .await
-            .clone())
+        let addr = crate::tunnel::inbound::TCP_INBOUND_ADDR
+            .get()
+            .cloned()
+            .ok_or_else(|| {
+                napi::Error::new(napi::Status::InvalidArg, "TCP inbound addr not found")
+            })?;
+        Ok(addr)
     }
 }

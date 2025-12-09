@@ -41,7 +41,7 @@ jobs:
           napi build --release --target ${{ matrix.rust_target }} --features napi -o "dist\${{ matrix.artifact_name }}"
           $nodeFile = Get-ChildItem -Path "dist\${{ matrix.artifact_name }}" -Filter "ping_tunnel*.node" | Select-Object -First 1
           if ($nodeFile) {
-            Move-Item -Path $nodeFile.FullName -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.node"
+            Move-Item -Path $nodeFile.FullName -Destination "dist\${{ matrix.artifact_name }}\edge-win-x64.node"
           } else {
             Write-Host "Error: .node file not found in dist\${{ matrix.artifact_name }}"
             Get-ChildItem -Path "dist\${{ matrix.artifact_name }}"
@@ -54,16 +54,16 @@ jobs:
         shell: powershell
         run: |
           cargo build --release --target ${{ matrix.rust_target }} --bin edge --bin supernode
-          Copy-Item -Path "target\${{ matrix.rust_target }}\release\edge.exe" -Destination "dist\${{ matrix.artifact_name }}\edge-${{ matrix.artifact_name }}.exe"
-          Copy-Item -Path "target\${{ matrix.rust_target }}\release\supernode.exe" -Destination "dist\${{ matrix.artifact_name }}\supernode-${{ matrix.artifact_name }}.exe"
+          Copy-Item -Path "target\${{ matrix.rust_target }}\release\edge.exe" -Destination "dist\${{ matrix.artifact_name }}\edge-win-x64.exe"
+          Copy-Item -Path "target\${{ matrix.rust_target }}\release\supernode.exe" -Destination "dist\${{ matrix.artifact_name }}\supernode-win-x64.exe"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: |
-            dist/${{ matrix.artifact_name }}/edge-${{ matrix.artifact_name }}*
-            dist/${{ matrix.artifact_name }}/supernode-${{ matrix.artifact_name }}*
+            dist/${{ matrix.artifact_name }}/edge-win-x64*
+            dist/${{ matrix.artifact_name }}/supernode-win-x64*
 
   release:
     needs: build

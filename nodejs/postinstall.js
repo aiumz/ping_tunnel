@@ -31,7 +31,7 @@ const libPath = path.join(__dirname, "edge.node");
 if (fs.existsSync(libPath)) {
   console.log(`Native binding found: ${libPath}`);
   process.exit(0);
-} else {
+} else if (process.env.SKIP_DOWNLOAD_EDGE_NODE !== 'true') {
   fetch(`https://github.com/aiumz/ping_tunnel/releases/download/v${packageVersion}/edge-${platformName}-${archName}.node`)
     .then(response => response.arrayBuffer())
     .then(buffer => {
