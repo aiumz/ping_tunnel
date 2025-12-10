@@ -6,6 +6,7 @@ use crate::transport::base::{
 use crate::transport::cert::NoCertificateVerification;
 use quinn::{ClientConfig as QuinnClientConfig, Endpoint, RecvStream, SendStream};
 use rustls::ClientConfig as RustlsClientConfig;
+use std::sync::OnceLock;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -14,6 +15,7 @@ use std::{
 };
 use tokio::io::{self, ReadBuf};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::{debug, error};
 
 pub struct QuinnStream {
     pub send: SendStream,
@@ -61,6 +63,7 @@ impl AsyncRead for QuinnStream {
 impl TransportStream for QuinnStream {}
 pub struct QuinnConnection {
     pub conn: quinn::Connection,
+    pub client_id: OnceLock<String>,
 }
 
 #[async_trait::async_trait]
@@ -74,6 +77,16 @@ impl TransportConnection for QuinnConnection {
         }
         let (send, recv) = self.conn.open_bi().await?;
         Ok(Box::new(QuinnStream { send, recv }))
+    }
+    fn get_client_id(&self) -> Option<&str> {
+        self.client_id.get().as_ref().map(|id| id.as_str())
+    }
+
+    fn set_client_id(&self, id: String) {
+        self.client_id
+            .set(id)
+            .map_err(|e| anyhow::anyhow!("Failed to set client id: {}", e))
+            .ok();
     }
 }
 
@@ -107,12 +120,12 @@ impl TransformServer for QuinnServerEndpoint {
         let endpoint = match Endpoint::server(server_config, config.addr.parse().unwrap()) {
             Ok(endpoint) => endpoint,
             Err(e) => {
-                eprintln!("[QUIC Server] Failed to bind QUIC endpoint: {:?}", e);
+                error!("[QUIC Server] Failed to bind QUIC endpoint: {:?}", e);
                 return Err(anyhow::anyhow!(e));
             }
         };
 
-        println!("[QUIC Server] Endpoint started, waiting for new QUIC connections...");
+        debug!("[QUIC Server] Endpoint started, waiting for new QUIC connections...");
         tokio::spawn(async move {
             while let Some(connecting) = endpoint.accept().await {
                 if let Ok(conn) = connecting.await {
@@ -120,6 +133,7 @@ impl TransformServer for QuinnServerEndpoint {
                     tokio::spawn(async move {
                         let connection = Arc::new(QuinnConnection {
                             conn: conn_clone.clone(),
+                            client_id: OnceLock::new(),
                         });
                         while let Ok((send, recv)) = conn_clone.accept_bi().await {
                             let connection = connection.clone();
@@ -140,7 +154,7 @@ impl TransformServer for QuinnServerEndpoint {
 }
 
 pub struct QuinnClientEndpoint {
-    pub conn: Arc<QuinnConnection>,
+    pub conn: Arc<dyn TransportConnection + Send + Sync>,
 }
 
 #[async_trait::async_trait]
@@ -174,11 +188,10 @@ impl TransformClient for QuinnClientEndpoint {
         let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
         endpoint.set_default_client_config(client_config);
 
-        println!("Connecting to Server: {} ...", config.addr);
         let addr = match config.addr.parse() {
             Ok(addr) => addr,
             Err(e) => {
-                eprintln!("Invalid server address: {}", e);
+                error!("Invalid server address: {}", e);
                 return Err(anyhow::anyhow!("Invalid server address: {}", e));
             }
         };
@@ -186,7 +199,7 @@ impl TransformClient for QuinnClientEndpoint {
         let connecting = match connecting {
             Ok(connecting) => connecting,
             Err(e) => {
-                eprintln!("Connection error: {}", e);
+                error!("Connection error: {}", e);
                 return Err(anyhow::anyhow!(e));
             }
         };
@@ -194,12 +207,15 @@ impl TransformClient for QuinnClientEndpoint {
         let conn = match connecting.await {
             Ok(conn) => conn,
             Err(e) => {
-                eprintln!("Connection handshake error: {}", e);
+                error!("Connection handshake error: {}", e);
                 return Err(anyhow::anyhow!("Connection handshake error: {}", e));
             }
         };
 
-        let conn_box = Arc::new(QuinnConnection { conn: conn.clone() });
+        let conn_box = Arc::new(QuinnConnection {
+            conn: conn.clone(),
+            client_id: OnceLock::new(),
+        });
         let conn_for_accept = conn.clone();
 
         tokio::spawn({

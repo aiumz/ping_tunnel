@@ -11,6 +11,8 @@ pub mod tunnel {
 
 pub mod transport;
 
+pub mod log;
+
 #[cfg(feature = "napi")]
 use napi_derive::napi;
 #[cfg(feature = "napi")]
@@ -38,6 +40,7 @@ impl EdgeClient {
 
     #[napi]
     pub fn connect(&self) -> napi::Result<()> {
+        crate::log::init_log();
         let server_addr = self.server_addr.clone();
         let token = self.token.clone();
         let forward_to = self.forward_to.clone();

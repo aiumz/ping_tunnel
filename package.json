@@ -1,6 +1,6 @@
 {
   "name": "ping_tunnel_edge",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Edge client for QUIC tunnel",
   "main": "index.js",
   "types": "index.d.ts",
@@ -27,8 +27,8 @@
     "build:all": "echo 'Please build for all platforms manually or use CI/CD'",
     "artifacts": "napi artifacts",
     "version": "napi version",
-    "edge": "QUINN_LOG=trace RUST_LOG=info cargo run --bin edge  -- 127.0.0.1:4433 127 127.0.0.1:11100",
-    "supernode": "cargo run --bin supernode -- 0.0.0.0:4433 0.0.0.0:4432 ./cert/cert.pem ./cert/key.pem"
+    "edge": "RUST_LOG=debug cargo run --bin edge  -- 127.0.0.1:4433 127 127.0.0.1:11100",
+    "supernode": "RUST_LOG=debug cargo run --bin supernode -- 0.0.0.0:4433 0.0.0.0:4432 ./cert/cert.pem ./cert/key.pem"
   },
   "dependencies": {
     "@napi-rs/cli": "^3.5.0"

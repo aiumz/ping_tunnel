@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::net::ToSocketAddrs;
 
 // constants
-pub const FORWARD_TO_KEY: &str = "X-Tunnel-Forward-To";
+pub const FORWARD_TO_KEY: &str = "X-Tunnel-Forward";
 pub const AUTH_TOKEN_KEY: &str = "X-Tunnel-Token";
 pub const DEVICE_NAME_KEY: &str = "device_name";
 pub const HEADER_FIXED_LEN: usize = 5;

@@ -1,12 +1,15 @@
+use ping_tunnel::log::init_log;
 use ping_tunnel::tunnel::edge::start_client;
 use std::env;
+use tracing::error;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    init_log();
     let args: Vec<String> = env::args().collect();
 
     if args.len() != 4 {
-        eprintln!("Usage: {} <server_addr:port> <token> <forward_to>", args[0]);
+        error!("Usage: {} <server_addr:port> <token> <forward_to>", args[0]);
         std::process::exit(1);
     }
 

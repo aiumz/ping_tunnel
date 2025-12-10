@@ -1,16 +1,15 @@
 use crate::transport::accept::register_on_accept_stream;
-use crate::transport::base::{ServerConfig, TransformServer, TransportStream};
+use crate::transport::base::{ServerConfig, TransformServer};
 use crate::transport::quic::QuinnServerEndpoint;
 use crate::tunnel::common::{AUTH_TOKEN_KEY, get_client_id_from_token};
 use crate::tunnel::inbound::{InboundConfig, bind_tcp_inbound};
-use crate::tunnel::outbound::forward_to_tcp;
-use crate::tunnel::packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta};
+use crate::tunnel::outbound::tcp_outbound;
+use crate::tunnel::packet::{TunnelCommand, TunnelMeta, TunnelPacket, response_packet};
 use crate::tunnel::session::{
     TransportSession, get_session, insert_session, refresh_session_by_id,
 };
 use serde_json::Value;
-use tokio::io::AsyncWriteExt;
-use tokio::io::WriteHalf;
+use tracing::{debug, error, info, warn};
 
 pub async fn start_server(
     quic_bind_addr: String,
@@ -18,8 +17,8 @@ pub async fn start_server(
     cert_path: String,
     key_path: String,
 ) -> anyhow::Result<()> {
-    println!(
-        "[Supernode] Initializing with QUIC={} TCP={} cert={} key={}",
+    info!(
+        "Initializing with QUIC={} TCP={} cert={} key={}",
         quic_bind_addr, tcp_bind_addr, cert_path, key_path
     );
     let config = ServerConfig {
@@ -32,23 +31,22 @@ pub async fn start_server(
     };
 
     register_on_accept_stream(move |_conn, stream| async move {
-        println!("[Supernode] Bi-directional QUIC stream accepted, waiting for command...");
+        debug!("Bi-directional QUIC stream accepted, waiting for command...");
         let (mut stream_reader, stream_writer) = tokio::io::split(stream);
-        let packet = match TunnelCommandPacket::read_command(&mut stream_reader).await {
+        let packet = match TunnelPacket::read_command(&mut stream_reader).await {
             Ok(packet) => packet,
             Err(err) => {
-                eprintln!("[Supernode] Failed to read command packet: {:?}", err);
+                error!("Failed to read command packet: {:?}", err);
                 return Err(err);
             }
         };
-        println!("[Supernode] Received command: {:?}", packet.command);
         match packet.command {
             TunnelCommand::Forward => {
-                println!("[Supernode] Forward command meta: {:?}", packet.meta);
+                debug!("Forward command meta: {:?}", packet.meta);
                 if let Err(err) =
-                    forward_to_tcp(stream_reader, stream_writer, packet, Option::None).await
+                    tcp_outbound(stream_reader, stream_writer, packet, Option::None).await
                 {
-                    eprintln!("[Supernode] forward_to_tcp failed: {:?}", err);
+                    error!("forward_to_tcp failed: {:?}", err);
                     return Err(err);
                 }
             }
@@ -60,19 +58,16 @@ pub async fn start_server(
                     },
                     None => "",
                 };
-                println!("[QUIC Server] Ping from client_id: {}", client_id);
-
                 if get_session(client_id).await.is_some() {
-                    println!("[QUIC Server] Session found, updating ping_at");
                     refresh_session_by_id(client_id).await;
                     if let Err(err) =
-                        response_command(stream_writer, TunnelCommand::Pong, &packet.meta).await
+                        response_packet(stream_writer, TunnelCommand::Pong, &packet.meta).await
                     {
-                        eprintln!("[Supernode] Failed to respond Pong: {:?}", err);
+                        error!("Failed to respond Pong: {:?}", err);
                         return Err(err);
                     }
                 } else {
-                    eprintln!(
+                    warn!(
                         "[QUIC Server] Session not found for client_id: {}",
                         client_id
                     );
@@ -84,6 +79,7 @@ pub async fn start_server(
                 if let Some(token) = token {
                     if let Some(token_str) = token.as_str() {
                         let client_id = get_client_id_from_token(token_str);
+                        _conn.set_client_id(client_id.clone());
                         insert_session(
                             client_id,
                             TransportSession {
@@ -96,14 +92,14 @@ pub async fn start_server(
                     }
                 }
                 if let Err(err) =
-                    response_command(stream_writer, TunnelCommand::AuthResult, &meta).await
+                    response_packet(stream_writer, TunnelCommand::AuthResult, &meta).await
                 {
-                    eprintln!("[Supernode] Failed to respond AuthResult: {:?}", err);
+                    error!("Failed to respond AuthResult: {:?}", err);
                     return Err(err);
                 }
             }
             _ => {
-                eprintln!("Unsupported command: {:?}", packet.command);
+                warn!("Unsupported command: {:?}", packet.command);
             }
         }
 
@@ -111,33 +107,13 @@ pub async fn start_server(
     });
 
     if let Err(e) = QuinnServerEndpoint::bind(config).await {
-        eprintln!("[Supernode] Failed to bind QUIC server: {:?}", e);
+        error!("Failed to bind QUIC server: {:?}", e);
         return Err(e);
     }
 
     if let Err(e) = bind_tcp_inbound(inbound_config, false).await {
-        eprintln!("[Supernode] Failed to bind TCP inbound: {:?}", e);
+        error!("Failed to bind TCP inbound: {:?}", e);
         return Err(e);
     }
     Ok(())
-}
-
-pub async fn response_command(
-    mut stream: WriteHalf<Box<dyn TransportStream>>,
-    command: TunnelCommand,
-    meta: &TunnelMeta,
-) -> Result<TunnelCommandPacket, anyhow::Error> {
-    let command_packet = TunnelCommandPacket::new(command, meta);
-    let command_bytes = command_packet.to_bytes();
-    if let Err(e) = stream.write_all(&command_bytes).await {
-        return Err(anyhow::anyhow!(e));
-    }
-    if let Err(e) = stream.flush().await {
-        return Err(anyhow::anyhow!(e));
-    }
-    if let Err(e) = stream.shutdown().await {
-        return Err(anyhow::anyhow!(e));
-    }
-    println!("response_command: {:?}", command_packet);
-    Ok(command_packet)
 }

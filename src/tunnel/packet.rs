@@ -1,8 +1,16 @@
-use crate::tunnel::common::{HEADER_FIXED_LEN, MAX_DATA_LEN};
+use crate::{
+    transport::base::TransportStream,
+    tunnel::{
+        common::{HEADER_FIXED_LEN, MAX_DATA_LEN},
+        session::get_default_session,
+    },
+};
 use serde_json;
 use serde_json::Value;
-use std::collections::HashMap;
-use tokio::io::{AsyncRead, AsyncReadExt};
+use std::{collections::HashMap, time::Duration};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, WriteHalf};
+use tracing::debug;
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum TunnelCommand {
@@ -17,13 +25,13 @@ pub enum TunnelCommand {
 pub type TunnelMeta = HashMap<String, Value>;
 
 #[derive(Debug, Clone)]
-pub struct TunnelCommandPacket {
+pub struct TunnelPacket {
     pub command: TunnelCommand,
     pub length: u32,
     pub meta: TunnelMeta,
 }
 
-impl TunnelCommandPacket {
+impl TunnelPacket {
     pub fn new(command: TunnelCommand, meta: &TunnelMeta) -> Self {
         Self {
             command: command,
@@ -78,7 +86,68 @@ impl TunnelCommandPacket {
             length,
             meta: Self::decode_meta(&data_buffer),
         };
-        println!("[QUIC Client] Received command: {:?}", result);
+        debug!("Received packet: {:?}", result);
         Ok(result)
     }
+}
+
+pub async fn send_packet(
+    command: TunnelCommand,
+    meta: &TunnelMeta,
+) -> Result<TunnelPacket, anyhow::Error> {
+    if let Some(session) = get_default_session().await {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let stream = session
+                .conn
+                .open_stream()
+                .await
+                .map_err(|e| anyhow::anyhow!("Connection closed: {}", e))?;
+            let (mut recv_stream, mut send_stream) = tokio::io::split(stream);
+            let command_packet = TunnelPacket::new(command, meta);
+            send_stream
+                .write_all(&command_packet.to_bytes())
+                .await
+                .map_err(|e| anyhow::anyhow!("Write error: {}", e))?;
+            send_stream
+                .flush()
+                .await
+                .map_err(|e| anyhow::anyhow!("Flush error: {}", e))?;
+            let response_packet = TunnelPacket::read_command(&mut recv_stream)
+                .await
+                .map_err(|e| anyhow::anyhow!("Read error: {}", e))?;
+            let _ = send_stream.shutdown().await;
+            Ok(response_packet)
+        })
+        .await
+        .map_err(|e| {
+            let err_msg = e.to_string();
+            if err_msg.contains("deadline has elapsed") || err_msg.contains("timeout") {
+                anyhow::anyhow!("Command timeout")
+            } else {
+                anyhow::anyhow!("Command error: {}", e)
+            }
+        })?
+    } else {
+        Err(anyhow::anyhow!("Default connection not found"))
+    }
+}
+
+pub async fn response_packet(
+    mut stream: WriteHalf<Box<dyn TransportStream>>,
+    command: TunnelCommand,
+    meta: &TunnelMeta,
+) -> Result<TunnelPacket, anyhow::Error> {
+    let command_packet = TunnelPacket::new(command, meta);
+    let command_bytes = command_packet.to_bytes();
+    if let Err(e) = stream.write_all(&command_bytes).await {
+        return Err(anyhow::anyhow!(e));
+    }
+    if let Err(e) = stream.flush().await {
+        return Err(anyhow::anyhow!(e));
+    }
+    if let Err(e) = stream.shutdown().await {
+        return Err(anyhow::anyhow!(e));
+    }
+    debug!("Responded packet: {:?}", command_packet);
+    Ok(command_packet)
 }

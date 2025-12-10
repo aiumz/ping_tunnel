@@ -2,10 +2,11 @@ use serde_json::{Value, json};
 use std::sync::{Arc, OnceLock};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tracing::{debug, error, info};
 
 use crate::tunnel::{
     common::FORWARD_TO_KEY,
-    packet::{TunnelCommand, TunnelCommandPacket, TunnelMeta},
+    packet::{TunnelCommand, TunnelMeta, TunnelPacket},
     session::{get_default_session, get_session, remove_session},
     sniff,
 };
@@ -27,7 +28,7 @@ pub async fn bind_tcp_inbound(
         .unwrap();
     if let Ok(addr) = listener.local_addr() {
         TCP_INBOUND_ADDR.set(addr.to_string()).unwrap();
-        println!("tcp inbound addr: {}", TCP_INBOUND_ADDR.get().unwrap());
+        info!("tcp inbound addr: {}", TCP_INBOUND_ADDR.get().unwrap());
     }
 
     loop {
@@ -38,11 +39,11 @@ pub async fn bind_tcp_inbound(
                     let request_info = match sniff::sniff_tcp(&mut tcp_recv).await {
                         Ok(info) => info,
                         Err(e) => {
-                            eprintln!("sniff_tcp error: {:?}", e);
+                            error!("sniff_tcp error: {:?}", e);
                             return;
                         }
                     };
-                    println!("request_info: {:?}", request_info);
+                    debug!("request_info: {:?}", request_info);
                     let tunnel_id = request_info.tunnel_id.clone();
 
                     let session = if use_default_session {
@@ -54,7 +55,7 @@ pub async fn bind_tcp_inbound(
                         let upstream_stream = match session.conn.open_stream().await {
                             Ok(stream) => stream,
                             Err(e) => {
-                                eprintln!("open_stream error: {:?}", e);
+                                error!("open_stream error: {:?}", e);
                                 remove_session(&tunnel_id).await;
                                 return;
                             }
@@ -62,23 +63,23 @@ pub async fn bind_tcp_inbound(
                         let (mut upstream_reader, mut upstream_writer) =
                             tokio::io::split(upstream_stream);
 
-                        println!("Forwarding HTTP request to: {}", request_info.host);
+                        info!("Forwarding HTTP request to: {}", request_info.host);
 
                         let tcp_to_transport = tokio::spawn(async move {
                             let meta = TunnelMeta::from([(
                                 FORWARD_TO_KEY.to_string(),
                                 Value::String(request_info.host.clone()),
                             )]);
-                            let command = TunnelCommandPacket::new(TunnelCommand::Forward, &meta);
-                            println!("Sending Forward command: {:?}", command);
+                            let command = TunnelPacket::new(TunnelCommand::Forward, &meta);
+                            debug!("Sending Forward command: {:?}", command);
                             if let Err(e) = upstream_writer.write_all(&command.to_bytes()).await {
-                                eprintln!("Failed to send Forward command: {:?}", e);
+                                error!("Failed to send Forward command: {:?}", e);
                                 return;
                             }
                             if let Err(e) =
                                 tokio::io::copy(&mut tcp_recv, &mut upstream_writer).await
                             {
-                                eprintln!("copy stream -> upstream error: {:?}", e);
+                                error!("copy stream -> upstream error: {:?}", e);
                             }
                             upstream_writer.shutdown().await.ok();
                         });
@@ -86,13 +87,13 @@ pub async fn bind_tcp_inbound(
                             if let Err(e) =
                                 tokio::io::copy(&mut upstream_reader, &mut tcp_send).await
                             {
-                                eprintln!("copy upstream -> stream error: {:?}", e);
+                                error!("copy upstream -> stream error: {:?}", e);
                             }
                             tcp_send.shutdown().await.ok();
                         });
                         let res = tokio::try_join!(tcp_to_transport, transport_to_tcp);
                         if let Err(e) = res {
-                            eprintln!("copy stream -> upstream error: {:?}", e);
+                            error!("copy stream -> upstream error: {:?}", e);
                         };
                     } else {
                         let _ = json_response(
@@ -100,6 +101,7 @@ pub async fn bind_tcp_inbound(
                             &json!({
                                 "code": 404,
                                 "message": format!("tunnel [{}] not online", tunnel_id),
+                                "tunnel_id": tunnel_id,
                             }),
                         )
                         .await;
@@ -107,7 +109,7 @@ pub async fn bind_tcp_inbound(
                 });
             }
             Err(e) => {
-                eprintln!("accept error: {:?}", e);
+                error!("accept error: {:?}", e);
                 continue;
             }
         }
@@ -127,10 +129,10 @@ async fn json_response(
     tcp_writer
         .write_all(response.as_bytes())
         .await
-        .unwrap_or_else(|e| eprintln!("[ERROR] Failed to write to TCP client: {}", e));
+        .unwrap_or_else(|e| error!("[ERROR] Failed to write to TCP client: {}", e));
     tcp_writer
         .shutdown()
         .await
-        .unwrap_or_else(|e| eprintln!("[ERROR] Failed to shutdown TCP client: {}", e));
+        .unwrap_or_else(|e| error!("[ERROR] Failed to shutdown TCP client: {}", e));
     Ok(())
 }

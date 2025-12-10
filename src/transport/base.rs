@@ -8,6 +8,8 @@ pub enum TransportKind {
 }
 #[async_trait::async_trait]
 pub trait TransportConnection: Send + Sync {
+    fn set_client_id(&self, id: String);
+    fn get_client_id(&self) -> Option<&str>;
     fn kind(&self) -> TransportKind;
     async fn open_stream(&self) -> anyhow::Result<Box<dyn TransportStream>>;
 }

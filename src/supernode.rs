@@ -1,8 +1,10 @@
+use ping_tunnel::log::init_log;
 use ping_tunnel::tunnel::supernode::start_server;
 use std::env;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    init_log();
     let args: Vec<String> = env::args().collect();
 
     let mut quic_bind_addr = "0.0.0.0:4433".to_string();
